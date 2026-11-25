@@ -1,0 +1,424 @@
+{
+  "version": "0.1.0",
+  "seed": 7,
+  "users": 16,
+  "window_scale": 120,
+  "windows_seconds": {
+    "1h": 30.0,
+    "5m": 7.5
+  },
+  "wall_seconds": 270,
+  "machine": "x86_64, 2 CPUs, Python 3.13.18",
+  "database": "postgresql+psycopg",
+  "world": {
+    "success": 3134,
+    "failed": 286,
+    "blocked": 442,
+    "unsafe_actions": 3
+  },
+  "baseline": {
+    "journeys": 182,
+    "per_min": 728.0,
+    "success": 0.989010989010989,
+    "failed": 0.01098901098901099,
+    "blocked": 0.0,
+    "p50_ms": 458.1,
+    "p95_ms": 989.5,
+    "cost_per_min": 9.83696,
+    "tokens_per_min": 5947644
+  },
+  "experiments": [
+    {
+      "fault": "model_rate_limit",
+      "target": "model:sim-large",
+      "intensity": 0.8,
+      "duration_s": 40.0,
+      "result": {
+        "rca": {
+          "unknown": 0,
+          "all_correct": 72,
+          "by_evidence": 57,
+          "named_other": 0,
+          "all_labelled": 73,
+          "fault_caused": 57,
+          "named_target": 57,
+          "by_statistics": 0
+        },
+        "baseline": {
+          "total": 415,
+          "failed": 8,
+          "blocked": 0,
+          "success": 407,
+          "failed_rate": 0.0193,
+          "cost_per_journey": 0.013751
+        },
+        "journeys": {
+          "total": 579,
+          "failed": 73,
+          "blocked": 0,
+          "success": 506,
+          "failed_rate": 0.1261,
+          "cost_per_journey": 0.005812
+        },
+        "detection": {
+          "seconds": 3.96,
+          "detected": true,
+          "response": "dependency quarantined, callers on fallback"
+        },
+        "containment": {
+          "after_response": {
+            "total": 517,
+            "failed": 54,
+            "blocked": 0,
+            "success": 463,
+            "failed_rate": 0.1044,
+            "cost_per_journey": 0.00592
+          },
+          "before_response": {
+            "total": 62,
+            "failed": 19,
+            "blocked": 0,
+            "success": 43,
+            "failed_rate": 0.3065,
+            "cost_per_journey": 0.004915
+          },
+          "unsafe_actions_after": 0,
+          "unsafe_actions_before": 0
+        },
+        "blast_radius": {
+          "users": 16,
+          "agents": [
+            "coder",
+            "concierge",
+            "deployer",
+            "finops",
+            "planner",
+            "researcher",
+            "reviewer",
+            "scribe",
+            "sentinel",
+            "sre"
+          ],
+          "sessions": 53,
+          "journey_types": [
+            "ask_question",
+            "cost_report",
+            "fix_incident",
+            "investigate_alert",
+            "ship_change"
+          ]
+        }
+      }
+    },
+    {
+      "fault": "tool_wrong_result",
+      "target": "tool:kb.search",
+      "intensity": 0.6,
+      "duration_s": 40.0,
+      "result": {
+        "rca": {
+          "unknown": 0,
+          "all_correct": 143,
+          "by_evidence": 30,
+          "named_other": 5,
+          "all_labelled": 148,
+          "fault_caused": 133,
+          "named_target": 128,
+          "by_statistics": 98
+        },
+        "baseline": {
+          "total": 568,
+          "failed": 55,
+          "blocked": 0,
+          "success": 513,
+          "failed_rate": 0.0968,
+          "cost_per_journey": 0.00613
+        },
+        "journeys": {
+          "total": 571,
+          "failed": 148,
+          "blocked": 0,
+          "success": 423,
+          "failed_rate": 0.2592,
+          "cost_per_journey": 0.008124
+        },
+        "detection": {
+          "seconds": 15.37,
+          "detected": true,
+          "response": "dependency quarantined, callers on fallback"
+        },
+        "containment": {
+          "after_response": {
+            "total": 353,
+            "failed": 50,
+            "blocked": 0,
+            "success": 303,
+            "failed_rate": 0.1416,
+            "cost_per_journey": 0.006096
+          },
+          "before_response": {
+            "total": 218,
+            "failed": 98,
+            "blocked": 0,
+            "success": 120,
+            "failed_rate": 0.4495,
+            "cost_per_journey": 0.011408
+          },
+          "unsafe_actions_after": 0,
+          "unsafe_actions_before": 0
+        },
+        "blast_radius": {
+          "users": 16,
+          "agents": [
+            "coder",
+            "concierge",
+            "deployer",
+            "finops",
+            "planner",
+            "researcher",
+            "reviewer",
+            "scribe",
+            "sentinel",
+            "sre"
+          ],
+          "sessions": 76,
+          "journey_types": [
+            "ask_question",
+            "cost_report",
+            "fix_incident",
+            "investigate_alert",
+            "ship_change"
+          ]
+        }
+      }
+    },
+    {
+      "fault": "context_poison",
+      "target": "agent:coder",
+      "intensity": 0.6,
+      "duration_s": 40.0,
+      "result": {
+        "rca": {
+          "unknown": 0,
+          "all_correct": 241,
+          "by_evidence": 230,
+          "named_other": 0,
+          "all_labelled": 241,
+          "fault_caused": 230,
+          "named_target": 230,
+          "by_statistics": 0
+        },
+        "baseline": {
+          "total": 580,
+          "failed": 49,
+          "blocked": 0,
+          "success": 531,
+          "failed_rate": 0.0845,
+          "cost_per_journey": 0.009241
+        },
+        "journeys": {
+          "total": 680,
+          "failed": 23,
+          "blocked": 218,
+          "success": 439,
+          "failed_rate": 0.0338,
+          "cost_per_journey": 0.008109
+        },
+        "detection": {
+          "seconds": 4.7,
+          "detected": true,
+          "response": "agent moved to suspended"
+        },
+        "containment": {
+          "after_response": {
+            "total": 612,
+            "failed": 10,
+            "blocked": 218,
+            "success": 384,
+            "failed_rate": 0.0163,
+            "cost_per_journey": 0.007803
+          },
+          "before_response": {
+            "total": 68,
+            "failed": 13,
+            "blocked": 0,
+            "success": 55,
+            "failed_rate": 0.1912,
+            "cost_per_journey": 0.010861
+          },
+          "unsafe_actions_after": 0,
+          "unsafe_actions_before": 0
+        },
+        "blast_radius": {
+          "users": 12,
+          "agents": [
+            "coder",
+            "concierge",
+            "planner",
+            "researcher",
+            "reviewer",
+            "scribe",
+            "sre"
+          ],
+          "sessions": 18,
+          "journey_types": [
+            "ask_question",
+            "fix_incident",
+            "investigate_alert",
+            "ship_change"
+          ]
+        }
+      }
+    },
+    {
+      "fault": "rogue_agent",
+      "target": "agent:deployer",
+      "intensity": 0.3,
+      "duration_s": 40.0,
+      "result": {
+        "rca": {
+          "unknown": 0,
+          "all_correct": 176,
+          "by_evidence": 164,
+          "named_other": 0,
+          "all_labelled": 176,
+          "fault_caused": 164,
+          "named_target": 164,
+          "by_statistics": 0
+        },
+        "baseline": {
+          "total": 640,
+          "failed": 7,
+          "blocked": 142,
+          "success": 491,
+          "failed_rate": 0.0109,
+          "cost_per_journey": 0.010145
+        },
+        "journeys": {
+          "total": 588,
+          "failed": 15,
+          "blocked": 161,
+          "success": 412,
+          "failed_rate": 0.0255,
+          "cost_per_journey": 0.01303
+        },
+        "detection": {
+          "seconds": 3.99,
+          "detected": true,
+          "response": "agent moved to supervised"
+        },
+        "containment": {
+          "after_response": {
+            "total": 534,
+            "failed": 12,
+            "blocked": 160,
+            "success": 362,
+            "failed_rate": 0.0225,
+            "cost_per_journey": 0.013057
+          },
+          "before_response": {
+            "total": 54,
+            "failed": 3,
+            "blocked": 1,
+            "success": 50,
+            "failed_rate": 0.0556,
+            "cost_per_journey": 0.012761
+          },
+          "unsafe_actions_after": 1,
+          "unsafe_actions_before": 2
+        },
+        "blast_radius": {
+          "users": 11,
+          "agents": [
+            "coder",
+            "concierge",
+            "deployer",
+            "planner",
+            "researcher",
+            "reviewer",
+            "scribe",
+            "sentinel",
+            "sre"
+          ],
+          "sessions": 15,
+          "journey_types": [
+            "ask_question",
+            "fix_incident",
+            "investigate_alert",
+            "ship_change"
+          ]
+        }
+      }
+    }
+  ],
+  "rca_last_window": {
+    "window_journeys": 366,
+    "not_successful": 89,
+    "culprits": [
+      {
+        "component": "agent:deployer",
+        "journeys": 79,
+        "evidence": 79,
+        "statistics": 0
+      },
+      {
+        "component": "agent:concierge",
+        "journeys": 4,
+        "evidence": 4,
+        "statistics": 0
+      },
+      {
+        "component": "agent:scribe",
+        "journeys": 2,
+        "evidence": 2,
+        "statistics": 0
+      },
+      {
+        "component": "agent:researcher",
+        "journeys": 1,
+        "evidence": 1,
+        "statistics": 0
+      },
+      {
+        "component": "agent:reviewer",
+        "journeys": 1,
+        "evidence": 1,
+        "statistics": 0
+      },
+      {
+        "component": "agent:coder",
+        "journeys": 1,
+        "evidence": 1,
+        "statistics": 0
+      },
+      {
+        "component": "agent:sre",
+        "journeys": 1,
+        "evidence": 1,
+        "statistics": 0
+      }
+    ],
+    "suspicion": []
+  },
+  "final_autonomy": {
+    "coder": "autonomous",
+    "concierge": "autonomous",
+    "deployer": "autonomous",
+    "finops": "autonomous",
+    "planner": "autonomous",
+    "researcher": "autonomous",
+    "reviewer": "autonomous",
+    "scribe": "autonomous",
+    "sentinel": "autonomous",
+    "sre": "autonomous"
+  },
+  "ingest": {
+    "spans": 60000,
+    "batch": 1000,
+    "clients": 4,
+    "seconds": 3.8,
+    "spans_per_second": 15790,
+    "p50_ms": 251.5,
+    "p95_ms": 323.7
+  }
+}

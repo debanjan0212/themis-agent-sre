@@ -1,0 +1,30 @@
+# Themis, described for IntentOps (https://github.com/debanjan0212/intentops).
+#
+#   intentops plan deploy/intent.yaml      replicas, error budget, burn-rate alerts, cost
+#   intentops check deploy/intent.yaml     policy
+#   intentops render deploy/intent.yaml    Kubernetes manifests for the cloud named below
+#
+# Themis judges agents by error budget, so it is deployed by its own error budget too.
+name: themis
+team: platform
+# Pin the image by digest before deploying. `make image` prints the digest of the build.
+image: ghcr.io/debanjan0212/themis-agent-sre:0.1.0
+port: 8600
+health_path: /readyz
+cloud: kind
+environment: prod
+exposure: internal
+data_classification: confidential # agent telemetry: who did what, with which tool
+release: canary
+slo:
+  availability: 99.9
+  latency_p95_ms: 300
+traffic: {peak_rps: 200, rps_per_replica: 60}
+resources: {cpu: 500m, memory: 512Mi}
+secrets:
+  - themis-db-url # THEMIS_DB_URL, a Postgres URL
+  - themis-bootstrap-key # THEMIS_BOOTSTRAP_KEY, the first admin key
+# In-cluster services Themis calls. The network policy allows egress to these and to DNS, nothing else.
+# Remove the incident receivers you do not run.
+dependencies: [postgres, aegis-war-room, argus]
+chart_version: 0.1.0

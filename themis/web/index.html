@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>Themis</title>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="top">
+      <a class="brand" href="#/">Themis<small>SRE for agent fleets</small></a>
+      <nav id="nav" aria-label="Sections">
+        <a href="#/">Fleet</a>
+        <a href="#/journeys">Journeys</a>
+        <a href="#/agents">Agents</a>
+        <a href="#/chaos">Chaos lab</a>
+        <a href="#/incidents">Incidents</a>
+      </nav>
+      <div id="status" class="status" aria-live="polite"></div>
+    </header>
+    <main id="view"></main>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,14 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: themis
+  namespace: platform
+  labels:
+    app.kubernetes.io/name: themis
+    app.kubernetes.io/part-of: platform
+    app.kubernetes.io/managed-by: intentops
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: themis

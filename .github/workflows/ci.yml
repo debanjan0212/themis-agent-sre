@@ -1,0 +1,75 @@
+# Runs on every push to main and every pull request: lint, the full test suite on SQLite and
+# Postgres, the dashboard in a real browser, the ecosystem tests against the sibling repos, and the image build.
+# Every action is pinned to a full commit SHA (see security.yml for why).
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Lint and tests (Python ${{ matrix.python }}, SQLite and Postgres)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.13"]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust # a throwaway database for one job: no password to keep
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      THEMIS_TEST_PG_URL: postgresql+psycopg://postgres@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ matrix.python }}
+      - run: pip install -e ".[dev,postgres,ui-test]"
+      - run: ruff check . && ruff format --check .
+      # The UI tests drive the Chrome that the runner image already has. Without Chrome they skip.
+      - name: Tests, with deprecation warnings treated as errors
+        run: python -W error::DeprecationWarning -m pytest -q
+
+  ecosystem:
+    name: With agent-harness-sdk, Aegis War Room, Argus and IntentOps
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+      - run: pip install -e ".[dev]"
+      - name: Clone the siblings at their pinned commits and run the ecosystem tests
+        run: ./scripts/ecosystem.sh
+
+  image:
+    name: Container image builds and starts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: docker build -t themis-agent-sre:ci .
+      - name: The image starts, answers, and does not run as root
+        run: |
+          docker run -d --name themis --read-only --tmpfs /tmp -e THEMIS_DB_URL=sqlite:////tmp/themis.db -p 8600:8600 themis-agent-sre:ci
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8600/readyz && break || sleep 1; done
+          curl -fsS http://127.0.0.1:8600/readyz
+          test "$(docker exec themis id -u)" = "65532"

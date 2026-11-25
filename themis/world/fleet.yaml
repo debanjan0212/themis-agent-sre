@@ -1,0 +1,73 @@
+# The fleet manifest: who may use what, each agent's targets, and what the models cost.
+# `themis world` applies it with PUT /api/fleet. For your own agents, write one like it and keep it in Git.
+
+prices: # USD per 1M input tokens, USD per 1M output tokens (made-up simulator prices)
+  sim-large: [3.0, 15.0]
+  sim-medium: [0.8, 4.0]
+  sim-small: [0.1, 0.4]
+
+fallbacks: # where callers go while a model is quarantined
+  sim-large: sim-medium
+  sim-medium: sim-small
+  sim-small: sim-medium
+
+agents:
+  concierge: # the front door: reads the request and routes it
+    model: sim-small
+    tools: [session.lookup]
+    handoffs: [planner, researcher, sre, finops]
+    cost_ceiling: 0.002
+  planner: # breaks a change into steps
+    model: sim-large
+    tools: [kb.search]
+    handoffs: [coder]
+    cost_ceiling: 0.03
+  researcher: # finds context
+    model: sim-medium
+    tools: [kb.search, web.fetch]
+    handoffs: [scribe]
+    cost_ceiling: 0.008
+  coder: # writes the change
+    model: sim-large
+    tools: [repo.read, repo.write]
+    handoffs: [reviewer]
+    cost_ceiling: 0.03
+  reviewer: # reviews it and runs the tests
+    model: sim-medium
+    tools: [repo.read, ci.run_tests]
+    handoffs: [sentinel]
+    cost_ceiling: 0.008
+  sentinel: # security scan before anything ships
+    model: sim-medium
+    tools: [sec.scan]
+    handoffs: [deployer]
+    cost_ceiling: 0.008
+  deployer: # ships through GitOps; the only agent allowed to change production
+    model: sim-small
+    tools: [gitops.open_pr, deploy.apply]
+    high_risk: [deploy.apply]
+    handoffs: [scribe]
+    cost_ceiling: 0.002
+  finops: # answers cost questions
+    model: sim-small
+    tools: [billing.query]
+    handoffs: [scribe]
+    cost_ceiling: 0.002
+  sre: # investigates alerts
+    model: sim-large
+    tools: [metrics.query, logs.search]
+    handoffs: [researcher, planner]
+    cost_ceiling: 0.03
+  scribe: # writes the answer, the summary or the postmortem
+    model: sim-small
+    tools: [docs.write]
+    handoffs: []
+    cost_ceiling: 0.002
+
+# What users ask for. Each journey is the chain of agents that serves it. `weight` is how often it happens.
+journeys:
+  ask_question: {weight: 4, steps: [concierge, researcher, scribe]}
+  ship_change: {weight: 3, steps: [concierge, planner, coder, reviewer, sentinel, deployer, scribe]}
+  investigate_alert: {weight: 2, steps: [concierge, sre, researcher, scribe]}
+  cost_report: {weight: 1, steps: [concierge, finops, scribe]}
+  fix_incident: {weight: 1, steps: [concierge, sre, planner, coder, reviewer, sentinel, deployer, scribe]}
