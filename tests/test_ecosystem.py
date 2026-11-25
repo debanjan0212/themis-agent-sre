@@ -224,6 +224,10 @@ def test_agent_harness_sdk_agents_obey_themis(tmp_path):
             )
             return json.loads(done.stdout.strip().splitlines()[-1])
 
+        def gate_says(name):
+            agents = httpx.get(f"{lab.url}/v1/gate/snapshot", headers={"Authorization": f"Bearer {key}"}).json()["agents"]
+            return agents[name]["autonomy"]
+
         def autonomy(name):
             agents = httpx.get(f"{lab.url}/api/overview", headers=auth).json()["agents"]
             return next(a["autonomy"] for a in agents if a["name"] == name)
@@ -233,6 +237,8 @@ def test_agent_harness_sdk_agents_obey_themis(tmp_path):
         assert [a["outcome"] for a in attempts] == ["escalated"] * 5
         assert "not in deployer's allow-list in Themis" in attempts[0]["reasons"][0]
         wait_for(lambda: autonomy("deployer") == "suspended", 20, "Themis to suspend the deployer")
+        # a runtime acts on the snapshot it last pulled (cached up to half a second), so wait for the snapshot too
+        wait_for(lambda: gate_says("deployer") == "suspended", 10, "the gate snapshot to say suspended")
 
         # suspended: even a tool on its allow-list now goes to a person
         (after,) = run("deployer", "restart")
@@ -241,6 +247,7 @@ def test_agent_harness_sdk_agents_obey_themis(tmp_path):
         # supervised: the action waits for a person in Themis, and runs once they say go
         body = {"level": "supervised", "reason": "new release, watch it"}
         httpx.post(f"{lab.url}/api/agents/releaser/autonomy", json=body, headers=auth).raise_for_status()
+        wait_for(lambda: gate_says("releaser") == "supervised", 10, "the gate snapshot to say supervised")
         cmd = [PY, str(script), lab.url, key, "releaser", "restart", "1"]
         waiting = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
         try:

@@ -213,6 +213,16 @@ def test_fleet_manifest_reaches_the_gate_snapshot(api):
     }
 
 
+def test_a_persons_autonomy_change_is_in_the_very_next_snapshot(api):
+    """The snapshot is cached for half a second; a person's decision must not wait for that on this replica."""
+    api.http.put("/api/fleet", headers=api.auth("admin"), json=FLEET).raise_for_status()
+    snapshot = lambda: api.http.get("/v1/gate/snapshot", headers=api.auth("ingest")).json()["agents"]["coder"]  # noqa: E731
+    assert snapshot()["autonomy"] == "autonomous"  # now cached
+    body = {"level": "suspended", "reason": "pulled for review"}
+    api.http.post("/api/agents/coder/autonomy", headers=api.auth("operate"), json=body).raise_for_status()
+    assert snapshot()["autonomy"] == "suspended"
+
+
 def test_approval_is_decided_once_and_expires_to_no(api, monkeypatch):
     def ask():
         body = {"agent": "deployer", "action": "tool:deploy.apply"}
