@@ -140,6 +140,179 @@ def test_an_incident_reaches_aegis_argus_and_incident_commander(tmp_path):
             server.wait(10)
 
 
+GOVERNED = """
+import json, sys
+from agent_harness_sdk import (Agent, ModelReply, ScriptedModel, ThemisApprover, ThemisGate, ThemisPolicy, ToolCall,
+                               setup_telemetry, tool)
+
+setup_telemetry("governed", console=None)
+
+
+@tool()
+def get_errors(service: str) -> dict:
+    \"\"\"Error rate for a service.\"\"\"
+    return {"service": service, "error_rate": 0.31}
+
+
+@tool(mutating=True)
+def rollback(service: str, version: str) -> dict:
+    \"\"\"Roll a service back.\"\"\"
+    return {"rolled_back": service}
+
+
+@tool(mutating=True, requires_approval=False)
+def restart(service: str) -> dict:
+    \"\"\"Restart a service.\"\"\"
+    return {"restarted": service}
+
+
+def brain(action, arguments):
+    def fn(messages, tools, json_mode):
+        stage = messages[0]["content"]
+        if "Stage READ" in stage:
+            if any(m["role"] == "tool" for m in messages):
+                return "errors are up"
+            return ModelReply(None, [ToolCall("1", "get_errors", {"service": "checkout"})])
+        if "Stage ANALYSE" in stage:
+            return {"summary": "checkout is failing", "likely_cause": "bad deploy", "confidence": 0.9}
+        return {"action": action, "arguments": arguments, "rationale": "fix it", "confidence": 0.9, "risk": "medium"}
+
+    return ScriptedModel(fn)
+
+
+url, key, name, action, times = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], int(sys.argv[5])
+arguments = {"rollback": {"service": "checkout", "version": "1.2"}, "restart": {"service": "checkout"}}[action]
+out = []
+with ThemisGate(url, key) as gate:
+    agent = Agent(name, model=brain(action, arguments), tools=[get_errors, rollback, restart],
+                  policy=ThemisPolicy(gate=gate), approver=ThemisApprover(gate, timeout_s=60, poll_s=0.2))
+    for _ in range(times):
+        run = agent.run("checkout is failing")
+        out.append({"outcome": run.outcome.status, "reasons": run.outcome.reasons,
+                    "approved_by": run.outcome.approval.by if run.outcome.approval else None})
+print(json.dumps(out))
+"""
+
+
+def test_agent_harness_sdk_agents_obey_themis(tmp_path):
+    """The SDK's ThemisPolicy and ThemisApprover against the real control plane: an agent that keeps reaching outside
+    its allow-list is suspended by Themis, the SDK then stops its actions, and a supervised agent's action waits for a
+    person in Themis before it runs."""
+    script = tmp_path / "governed.py"
+    script.write_text(GOVERNED)
+    # real-time windows: the five violations must land inside Themis's five-minute window
+    lab = Lab(f"sqlite:///{tmp_path}/t.db", free_port(), 1.0, eval_interval=0.3, settle_seconds=0.2).start()
+    try:
+        auth = {"Authorization": f"Bearer {lab.key}"}
+        key = lab.new_key("default", ["ingest"])
+        env = {
+            **os.environ,
+            "OTEL_EXPORTER_OTLP_ENDPOINT": lab.url,
+            "OTEL_EXPORTER_OTLP_HEADERS": f"Authorization=Bearer%20{key}",
+        }
+        fleet = {name: {"tools": ["get_errors", "restart"], "high_risk": ["rollback"]} for name in ("deployer", "releaser")}
+        httpx.put(f"{lab.url}/api/fleet", json={"agents": fleet}, headers=auth).raise_for_status()
+
+        def run(name, action, times=1):
+            done = subprocess.run(
+                [PY, str(script), lab.url, key, name, action, str(times)],
+                env=env,
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            return json.loads(done.stdout.strip().splitlines()[-1])
+
+        def autonomy(name):
+            agents = httpx.get(f"{lab.url}/api/overview", headers=auth).json()["agents"]
+            return next(a["autonomy"] for a in agents if a["name"] == name)
+
+        # five reaches outside the allow-list: each is stopped by the SDK and reported to Themis
+        attempts = run("deployer", "rollback", 5)
+        assert [a["outcome"] for a in attempts] == ["escalated"] * 5
+        assert "not in deployer's allow-list in Themis" in attempts[0]["reasons"][0]
+        wait_for(lambda: autonomy("deployer") == "suspended", 20, "Themis to suspend the deployer")
+
+        # suspended: even a tool on its allow-list now goes to a person
+        (after,) = run("deployer", "restart")
+        assert after["outcome"] == "escalated" and "suspended deployer" in after["reasons"][0]
+
+        # supervised: the action waits for a person in Themis, and runs once they say go
+        body = {"level": "supervised", "reason": "new release, watch it"}
+        httpx.post(f"{lab.url}/api/agents/releaser/autonomy", json=body, headers=auth).raise_for_status()
+        cmd = [PY, str(script), lab.url, key, "releaser", "restart", "1"]
+        waiting = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        try:
+            pending = wait_for(
+                lambda: [
+                    a for a in httpx.get(f"{lab.url}/api/approvals", headers=auth).json()["approvals"] if a["status"] == "pending"
+                ],
+                30,
+                "the releaser's action to reach Themis",
+            )
+            assert pending[0]["agent"] == "releaser" and pending[0]["action"] == "tool:restart"
+            decision = {"approve": True, "by": "debanjan"}
+            httpx.post(f"{lab.url}/api/approvals/{pending[0]['id']}/decision", json=decision, headers=auth).raise_for_status()
+            out, _ = waiting.communicate(timeout=60)
+        finally:
+            waiting.kill()
+        (approved,) = json.loads(out.strip().splitlines()[-1])
+        assert approved == {"outcome": "done", "reasons": [], "approved_by": "themis"}
+
+        # and Themis read the stopped runs as blocked, with the deployer named as the cause and the SDK's reason
+        def blocked():
+            js = httpx.get(f"{lab.url}/api/journeys", headers=auth).json()["journeys"]
+            return [j for j in js if j["outcome"] == "blocked"]
+
+        stopped = wait_for(lambda: len(b := blocked()) == 6 and b, 20, "the six stopped runs to be judged")
+        assert {j["culprit"] for j in stopped} == {"agent:deployer"}
+        assert any("suspended deployer" in (j["culprit_reason"] or "") for j in stopped)
+    finally:
+        lab.stop()
+
+
+def test_aegis_and_argus_report_their_own_agents(tmp_path):
+    """The responders are agents too: with the OpenTelemetry variables set, Themis sees every one of them."""
+    lab = Lab(f"sqlite:///{tmp_path}/t.db", free_port(), 120.0, eval_interval=0.3, settle_seconds=0.2).start()
+    try:
+        key = lab.new_key("default", ["ingest"])
+        env = {
+            **os.environ,
+            "OTEL_EXPORTER_OTLP_ENDPOINT": lab.url,
+            "OTEL_EXPORTER_OTLP_HEADERS": f"Authorization=Bearer%20{key}",
+            "AEGIS_PACE": "0",
+            "AEGIS_AUDIT_LOG": str(tmp_path / "aegis-audit.jsonl"),
+        }
+        aegis = [PY, "-m", "aegis", "demo", "--scenario", "payment-failure", "--approve", "go"]
+        subprocess.run(aegis, cwd=SIBLINGS / "aegis-war-room", env=env, check=True, capture_output=True, timeout=120)
+        argus = [PY, "-m", "argus", "investigate", "--scenario", "evals/scenarios/02-oom-kill.yaml"]
+        subprocess.run(argus, cwd=SIBLINGS / "argus-sre-agent", env=env, check=True, capture_output=True, timeout=120)
+
+        auth = {"Authorization": f"Bearer {lab.key}"}
+        journeys = wait_for(
+            lambda: (js := httpx.get(f"{lab.url}/api/journeys", headers=auth).json()["journeys"]) and len(js) == 3 and js,
+            20,
+            "the two Aegis traces and the Argus trace to be judged",
+        )
+        assert {j["outcome"] for j in journeys} == {"success"}
+        by_name = {j["name"]: j for j in journeys}
+        assert by_name["incident investigate"]["session_id"] == by_name["incident act"]["session_id"]
+        uses = {
+            u["agent"]: u
+            for u in httpx.get(f"{lab.url}/api/journeys/{by_name['incident act']['trace_id']}", headers=auth).json()["uses"]
+        }
+        assert uses["executor"]["tools"] == ["set_feature_flag"]
+        detail = httpx.get(f"{lab.url}/api/journeys/{by_name['incident act']['trace_id']}", headers=auth).json()
+        decisions = {sp["attrs"].get("themis.gate.decision") for sp in detail["spans"]} - {None}
+        assert decisions == {"approved_by_human"}
+        names = {a["name"] for a in httpx.get(f"{lab.url}/api/overview", headers=auth).json()["agents"]}
+        crew = {"triage", "signals", "changes", "runbook", "planner", "defender", "executor", "verifier", "scribe"}
+        assert crew | {"argus"} <= names
+    finally:
+        lab.stop()
+
+
 def test_intentops_plans_checks_and_renders_the_themis_deployment(tmp_path):
     """deploy/intent.yaml is the source of truth for the Kubernetes manifests in deploy/kubernetes."""
     intentops = [PY, "-m", "intentops"]

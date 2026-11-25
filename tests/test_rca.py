@@ -62,6 +62,14 @@ def test_a_denied_action_blames_the_agent_that_tried_it():
         assert rca.attribute([ROOT, span("a", "agent", agent="coder", ok=False, start=1), denied])[0] == "agent:coder"
 
 
+def test_the_runtime_reason_for_a_block_is_quoted():
+    why = "Themis has suspended deployer, so a person must take this action"
+    blocked = span("t", "tool", parent="a", agent="deployer", target="rollback", ok=False, start=2)
+    blocked["attrs"] = {"themis.gate.decision": "deny", "themis.gate.reason": why}
+    culprit, reason, _ = rca.attribute([ROOT, span("a", "agent", agent="deployer", start=1), blocked])
+    assert culprit == "agent:deployer" and reason == f"deployer was stopped before rollback: {why}"
+
+
 def test_a_call_that_went_to_the_fallback_is_a_different_component():
     call = span("t", "tool", agent="researcher", target="kb.search", **{"themis.fallback": True})
     assert rca.component(call) == "tool:kb.search (fallback)"

@@ -1,0 +1,9 @@
+{
+  "title": "ship_change",
+  "kv": [
+    "user-011, session s011-ed960",
+    "371 ms across 16 steps",
+    "$0.0042 on 5,220 tokens",
+    "agent:coder (evidence, 70% confident). coder handed invalid work to reviewer"
+  ]
+}

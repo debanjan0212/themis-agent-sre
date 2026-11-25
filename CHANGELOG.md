@@ -2,6 +2,43 @@
 
 Every release, newest first. Versions follow semantic versioning.
 
+## 0.2.0 (25 November 2026)
+
+Held to its own SLO, and connected to the sibling projects both ways.
+
+- **Measured reliability:** `scripts/soak.py` runs three replicas behind a load balancer on production settings,
+  kills the leader, does a rolling restart and stops Postgres, and writes `docs/RELIABILITY.md`. In the committed
+  run 132 of 115,428 spans were lost, all on the exporter's default 10 s timeout and none on 30 s, and nothing
+  was counted twice.
+- **Fixed, found by the soak:** replicas starting together on an empty Postgres raced to create the tables and
+  all but one crashed. Schema creation now takes an advisory lock.
+- **Failover:** a replica stopped for a rolling deploy gives its lease up and the others check every second, so
+  the evaluator moves in under a second. Each process holds the lease under its own name, so two replicas
+  configured with the same name can never both lead. A journey is claimed before it is judged, so a leader that
+  lost the lease mid-tick cannot count it twice.
+- **Overload and outages:** a database that is down or out of connections is answered `503` with
+  `Retry-After`, which OpenTelemetry exporters retry, instead of `500`. One trace that cannot be judged no longer
+  stops the others, and a slow incident receiver no longer holds up the evaluator.
+- **Faster dashboard:** what-uses-what is pre-aggregated per minute, so the overview stays fast as spans pile
+  up. **Metrics:** the HTTP histogram now uses the OpenTelemetry names (`http_server_request_duration_seconds`),
+  which the SLO rules IntentOps renders already read, plus evaluator lag, journeys judged, traces skipped and
+  webhook deliveries. `deploy/alerts.yaml` alerts on Themis's own health; `deploy/otel-collector.yaml` is a
+  Collector with a disk queue for outages longer than an exporter retries.
+- **agent-harness-sdk obeys Themis:** `ThemisPolicy` and `ThemisApprover` in the SDK. Ecosystem tests run them
+  against the control plane: violations suspend the agent, the SDK stops its actions, a supervised action waits
+  for an approval in Themis. An escalated harness run reads as blocked, and root cause quotes the runtime's
+  reason for a block.
+- **Aegis War Room and Argus report their own agents** over OpenTelemetry, checked by the ecosystem tests.
+- **A new dashboard:** near-black glass panels, and a fleet map drawn as an instrument: segmented rings that
+  turn and tilt like a gyroscope's, the human as a lit sphere at the centre, and traffic running along the lines
+  as light, red where calls fail. Vitals carry a sparkline of the last few minutes. Sora and JetBrains Mono. All
+  motion stops for anyone who has asked for reduced motion, and every moving ring is its own layer, so the map is
+  not redrawn on each frame. The dashboard no longer prints "null" where a part is missing.
+- **A product page:** `site/` is built only from measured numbers, each footnoted, and published by
+  `.github/workflows/pages.yml`. `tests/test_design.py` checks it against the 20 signs of a generated page.
+- **Demo video:** `scripts/film.py` films with Chrome's own screencast, about five times the frame rate of
+  screenshots, and adds a card for the soak results.
+
 ## 0.1.0 (25 November 2026)
 
 The first working version.

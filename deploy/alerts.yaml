@@ -1,0 +1,57 @@
+# Alerts for Themis's own health, beyond the availability and latency SLO alerts IntentOps renders into
+# deploy/kubernetes/slo-rules.yaml. Apply both. Every metric here is on /metrics with no key.
+#
+#   kubectl apply -f deploy/alerts.yaml
+#
+# docs/RUNBOOK.md has what to do for each one.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: themis-health
+  namespace: platform
+  labels:
+    app.kubernetes.io/name: themis
+    app.kubernetes.io/part-of: platform
+spec:
+  groups:
+    - name: themis.evaluator
+      rules:
+        # Nobody is judging journeys, so nobody is demoting agents. A crashed leader is replaced after three
+        # evaluator intervals (45 s by default), so two minutes means something is really wrong.
+        - alert: ThemisNoEvaluatorLeader
+          expr: max(themis_evaluator_leader{namespace="platform"}) < 1
+          for: 2m
+          labels:
+            severity: page
+          annotations:
+            summary: No Themis replica is running the evaluator, so journeys are not being judged
+            runbook: https://github.com/debanjan0212/themis-agent-sre/blob/main/docs/RUNBOOK.md#the-dashboard-is-stale-or-nothing-is-being-judged
+
+        # Journeys are judged, but late. Normal is under one interval plus THEMIS_SETTLE_SECONDS (17 s by default).
+        - alert: ThemisEvaluatorBehind
+          expr: max(themis_evaluator_lag_seconds{namespace="platform"}) > 120
+          for: 5m
+          labels:
+            severity: ticket
+          annotations:
+            summary: Finished journeys are waiting more than 2 minutes to be judged
+            runbook: https://github.com/debanjan0212/themis-agent-sre/blob/main/docs/RUNBOOK.md#the-evaluator-is-behind
+
+        - alert: ThemisTracesSkipped
+          expr: sum(increase(themis_traces_skipped_total{namespace="platform"}[15m])) > 0
+          labels:
+            severity: ticket
+          annotations:
+            summary: Some traces could not be judged and were skipped. The replica logs name each one
+            runbook: https://github.com/debanjan0212/themis-agent-sre/blob/main/docs/RUNBOOK.md#a-trace-was-skipped
+
+    - name: themis.incidents
+      rules:
+        # An incident that was opened but never reached Aegis, Argus or whoever receives them
+        - alert: ThemisWebhooksFailing
+          expr: sum(increase(themis_webhook_deliveries_total{namespace="platform",result="failed"}[15m])) > 0
+          labels:
+            severity: page
+          annotations:
+            summary: Themis gave up delivering an incident webhook after 5 attempts
+            runbook: https://github.com/debanjan0212/themis-agent-sre/blob/main/docs/RUNBOOK.md#incidents-are-not-reaching-the-receivers

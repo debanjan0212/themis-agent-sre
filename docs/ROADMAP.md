@@ -7,15 +7,23 @@ only when its trigger is met.** Each feature costs something to run, to secure a
 
 | Repository | Its job | How Themis meets it |
 |---|---|---|
-| [agent-harness-sdk](https://github.com/debanjan0212/agent-harness-sdk) | Build agents, with OpenTelemetry built in | Themis reads those spans as they are |
-| [aegis-war-room](https://github.com/debanjan0212/aegis-war-room) | Agents investigate an incident; a human says go or no-go | Receives Themis incidents; its agents can be observed by Themis |
-| [argus-sre-agent](https://github.com/debanjan0212/argus-sre-agent) | Alert → root cause → fix as a GitOps pull request | Receives Themis incidents |
+| [agent-harness-sdk](https://github.com/debanjan0212/agent-harness-sdk) | Build agents, with OpenTelemetry built in | Themis reads those spans as they are; `ThemisPolicy` and `ThemisApprover` make its agents obey the gate |
+| [aegis-war-room](https://github.com/debanjan0212/aegis-war-room) | Agents investigate an incident; a human says go or no-go | Receives Themis incidents; reports its own agents to Themis over OpenTelemetry |
+| [argus-sre-agent](https://github.com/debanjan0212/argus-sre-agent) | From an alert to the root cause to a fix as a GitOps pull request | Receives Themis incidents; reports its own investigations to Themis |
 | [intentops](https://github.com/debanjan0212/intentops) | Describe a service once, run it on any cloud | Plans and renders Themis's own deployment; same burn-rate table |
 | **themis** | Keeps the agents themselves reliable | |
 
 The others make agents do SRE work. Themis does SRE work on the agents.
 
-## 0.1 (this release)
+## 0.2 (this release)
+
+- Held to its own SLO by a soak test with a crashed leader, a rolling restart and a database outage
+  (`docs/RELIABILITY.md`); the soak found and fixed a start-up race between replicas
+- Lease hand-over in about a second on a clean stop; 503 with `Retry-After` when the database is down or busy
+- agent-harness-sdk agents obey the gate; Aegis and Argus report their own agents
+- A dashboard and product page checked against the marks of a generated page
+
+## 0.1
 
 - OTLP ingest of GenAI spans; journeys, sessions, cost, what uses what
 - Four indicators per agent, multi-window burn rates, the autonomy ladder
@@ -33,7 +41,7 @@ The others make agents do SRE work. Themis does SRE work on the agents.
 |---|---|---|
 | A key per agent, and spans checked against it | Today one agent could report spans in another's name (see `SECURITY.md`) | First deployment with agents from more than one team |
 | Run the benchmark with real models (Ollama on a laptop, then a paid model) | The accuracy numbers are from a simulator and are an upper bound | Before showing the numbers to a customer |
-| An adapter for the Claude Agent SDK's hooks, and one for agent-harness-sdk's approvals | So the gate is enforced without hand-written glue | First real agent wired to the gate |
+| An adapter for the Claude Agent SDK's hooks | So the gate is enforced without hand-written glue, as it now is for agent-harness-sdk | First Claude Agent SDK agent wired to Themis |
 | MCP gateway mode: tools are called through Themis, which asks the gate | Makes the gate enforcing instead of advisory | A runtime you do not control |
 | Slow-burn tickets (the 1x / 3d rule opens a low-severity incident) | The rule is evaluated and shown, but opens nothing yet | First week of real traffic |
 | Sign-in for people (OIDC) instead of pasted keys | Keys are right for machines, not for a team of operators | More than three people using the dashboard |

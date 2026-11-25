@@ -57,9 +57,21 @@ flowchart LR
 - **API replicas are stateless.** Run as many as you like behind a Service. In-memory state is only caches with
   a short life (keys 5s, snapshot 0.5s, overview 1s) and the per-replica rate limiter.
 - **One evaluator leads.** Every replica runs the evaluator thread; a lease row in the database decides which
-  one works (`db.take_lease`). If the leader stops renewing, another takes over after three intervals.
+  one works (`db.take_lease`). Each process holds it under its own name (the instance name plus a random part),
+  so two replicas can never both lead. A leader that is stopped gives the lease up on the way out and the others
+  check every second, so a rolling deploy hands over in about a second. A leader that crashes cannot give it up:
+  another takes over when the lease expires, after three intervals.
   `test_two_replicas_share_the_work_and_survive_losing_the_leader` kills the leader and checks this on SQLite and
   Postgres.
+- **Nothing is counted twice.** A journey is claimed (`done = true` where it was false) in the same transaction
+  that counts it, so a leader that lost the lease in the middle of a tick gets nothing from its claim.
+- **Overload and outages answer 503.** A database that is unreachable or out of connections is answered `503`
+  with `Retry-After`, which OpenTelemetry exporters retry. Requests wait at most 5 s for a connection rather than
+  pile up.
+- **Replicas can start together.** Schema creation on Postgres takes an advisory lock, so replicas starting at
+  the same moment on an empty database do not race.
+- **Measured.** [RELIABILITY.md](RELIABILITY.md) is a soak run against all of this: a crashed leader, a rolling
+  restart and a database outage under load.
 - **The data plane does not depend on the control plane being up.** A runtime keeps its last snapshot if Themis
   is unreachable. Only high-risk approvals fail closed.
 - **Postgres is the one stateful part.** Use a managed, replicated Postgres. Themis adds no other moving parts:

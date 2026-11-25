@@ -18,7 +18,7 @@ import logging
 import threading
 import time
 import uuid
-from collections import defaultdict
+from collections import Counter, defaultdict
 
 import httpx
 import sqlalchemy as sa
@@ -30,11 +30,13 @@ from themis.db import (
     approvals,
     audit_log,
     autonomy_events,
+    edge_buckets,
     experiments,
     gate_events,
     incidents,
     insert_ignore,
     journeys,
+    leases,
     quarantine,
     sli_buckets,
     spans,
@@ -45,6 +47,9 @@ from themis.security import check_webhook_url, sign
 from themis.settings import Settings
 
 log = logging.getLogger("themis.engine")
+# Counted in this process, read by /metrics. Only the leader's numbers move.
+COUNTERS: Counter = Counter()
+NOTIFY_BUDGET = 5.0  # seconds a tick may spend sending webhooks; the rest wait for the next tick
 
 
 class Superseded(Exception):
@@ -58,9 +63,16 @@ QUARANTINE_MIN_BAD, QUARANTINE_RATIO, QUARANTINE_BASE, QUARANTINE_MAX = 5, 0.2, 
 
 def tick(engine: sa.Engine, s: Settings, now: float | None = None) -> dict:
     now = now or time.time()
-    stats = {"journeys": 0, "moves": 0}
+    stats = {"journeys": 0, "moves": 0, "lag": 0.0}
     with engine.connect() as conn:
         tenant_rows = conn.execute(select(tenants.c.id, tenants.c.config)).all()
+        # how long the oldest finished journey has waited to be judged: the evaluator's own SLI
+        c = spans.c
+        waiting = select(func.min(c.end)).where(c.is_root, ~c.done, c.end < now - s.settle_seconds)
+        for tid, _ in tenant_rows:
+            oldest = conn.execute(waiting.where(c.tenant_id == tid)).scalar()
+            if oldest is not None:
+                stats["lag"] = max(stats["lag"], now - s.settle_seconds - oldest)
     for tid, cfg in tenant_rows:
         for _ in range(10):  # drain a backlog, but never spin for ever inside one tick
             try:
@@ -77,7 +89,8 @@ def tick(engine: sa.Engine, s: Settings, now: float | None = None) -> dict:
             stats["moves"] += evaluate_autonomy(conn, s, tid, now)
             evaluate_quarantine(conn, s, tid, now, recent)
             run_experiments(conn, s, tid, now)
-    notify(engine, s)
+    notify(engine, s, budget=NOTIFY_BUDGET)
+    COUNTERS["journeys_judged"] += stats["journeys"]
     return stats
 
 
@@ -107,17 +120,36 @@ def finalise(conn: sa.Connection, s: Settings, tid: str, cfg: dict, now: float) 
         by_trace[row["trace_id"]].append(dict(row))
     agent_cfg = {n: cf or {} for n, cf in conn.execute(select(agents.c.name, agents.c.config).where(agents.c.tenant_id == tid))}
     buckets: dict[tuple, list[int]] = defaultdict(lambda: [0, 0])
+    edges: dict[tuple, list] = defaultdict(lambda: [0, 0, 0.0, 0.0, None])
     fixes, rows, seen = [], [], {}
     for trace_id in trace_ids:
         ss = by_trace[trace_id]
-        root = min((x for x in ss if x["is_root"]), key=lambda x: x["start"])
-        fixes += _resolve(ss, cfg.get("prices") or {})
-        rows.append(_judge(tid, root, ss))
-        _account(ss, agent_cfg, s.bucket_seconds, buckets)
+        cells: dict[tuple, list[int]] = defaultdict(lambda: [0, 0])
+        uses: dict[tuple, list] = defaultdict(lambda: [0, 0, 0.0, 0.0, None])
+        try:
+            root = min((x for x in ss if x["is_root"]), key=lambda x: x["start"])
+            trace_fixes = _resolve(ss, cfg.get("prices") or {})
+            row = _judge(tid, root, ss)
+            _account(ss, agent_cfg, s.bucket_seconds, cells)
+            _uses(ss, s.bucket_seconds, uses)
+        except Exception:  # noqa: BLE001 - one malformed trace must never stop every other journey being judged
+            log.exception("trace %s could not be judged and was skipped", trace_id)
+            COUNTERS["traces_skipped"] += 1
+            continue
+        fixes += trace_fixes
+        rows.append(row)
+        for key, (good, total) in cells.items():
+            buckets[key][0] += good
+            buckets[key][1] += total
+        for key, (calls, errors, seconds, cost, pod) in uses.items():
+            cell = edges[key]
+            cell[0], cell[1], cell[2], cell[3] = cell[0] + calls, cell[1] + errors, cell[2] + seconds, cell[3] + cost
+            cell[4] = pod or cell[4]
         for x in ss:
             if x["kind"] == "agent" and x["agent"]:
                 seen[x["agent"]] = max(seen.get(x["agent"], 0.0), x["end"])
-    conn.execute(insert(journeys), rows)
+    if rows:
+        conn.execute(insert(journeys), rows)
     if fixes:
         fix = update(spans).where(c.id == sa.bindparam("b_id")).values(agent=sa.bindparam("b_agent"), cost=sa.bindparam("b_cost"))
         conn.execute(fix, fixes)
@@ -128,6 +160,13 @@ def finalise(conn: sa.Connection, s: Settings, tid: str, cfg: dict, now: float) 
             conn.execute(
                 insert(sli_buckets).values(tenant_id=tid, subject=subject, sli=sli, bucket=bucket, good=good, total=total)
             )
+    eb = edge_buckets.c
+    for (agent, kind, target, bucket), (calls, errors, seconds, cost, pod) in edges.items():
+        key = sa.and_(eb.tenant_id == tid, eb.agent == agent, eb.kind == kind, eb.target == target, eb.bucket == bucket)
+        grow = dict(calls=eb.calls + calls, errors=eb.errors + errors, seconds=eb.seconds + seconds, cost=eb.cost + cost)
+        if not conn.execute(update(edge_buckets).where(key).values(**grow, pod=sa.func.coalesce(pod, eb.pod))).rowcount:
+            row = dict(tenant_id=tid, agent=agent, kind=kind, target=target, bucket=bucket)
+            conn.execute(insert(edge_buckets).values(**row, calls=calls, errors=errors, seconds=seconds, cost=cost, pod=pod))
     known = set(agent_cfg)
     insert_ignore(
         conn,
@@ -163,6 +202,8 @@ def _resolve(ss: list[dict], prices: dict) -> list[dict]:
 def _judge(tid: str, root: dict, ss: list[dict]) -> dict:
     attrs = root.get("attrs") or {}
     outcome = attrs.get("themis.journey.outcome")
+    if outcome not in ("success", "failed", "blocked") and attrs.get("agent.run.status") == "escalated":
+        outcome = "blocked"  # agent-harness-sdk: the run stopped and handed its action to a person
     if outcome not in ("success", "failed", "blocked"):
         outcome = "success" if root["ok"] else "failed"
     culprit = source = reason = confidence = None
@@ -224,6 +265,18 @@ def _account(ss: list[dict], agent_cfg: dict, bucket_seconds: float, buckets: di
             high = attrs.get("themis.action.risk") == "high" or x["target"] in (cfg.get("high_risk") or ())
             if high:
                 add(agent, "safe_actions", x["end"], x["ok"] and attrs.get("themis.check.passed") is not False)
+
+
+def _uses(ss: list[dict], bucket_seconds: float, uses: dict) -> None:
+    """One journey's contribution to the fleet map: calls, errors, time and cost per agent and what it used."""
+    for x in ss:
+        if x["agent"] and x["kind"] != "other" and (x["kind"] == "agent" or x["target"]):
+            cell = uses[(x["agent"], x["kind"], x["target"] if x["kind"] != "agent" else "", int(x["end"] // bucket_seconds))]
+            cell[0] += 1
+            cell[1] += not x["ok"]
+            cell[2] += x["end"] - x["start"]
+            cell[3] += x["cost"] or 0.0
+            cell[4] = x["pod"] or cell[4]
 
 
 def recent_journeys(conn: sa.Connection, s: Settings, tid: str, now: float) -> list[dict]:
@@ -423,18 +476,27 @@ def alert_payload(inc: dict, s: Settings) -> dict:
     }
 
 
-def notify(engine: sa.Engine, s: Settings) -> None:
-    """At-least-once delivery. The network call happens outside any database transaction."""
+def notify(engine: sa.Engine, s: Settings, budget: float = 60.0) -> None:
+    """At-least-once delivery. The network call happens outside any database transaction.
+
+    A tick spends at most `budget` seconds here, so a receiver that hangs delays its own incidents, not the
+    judging of every journey. Whatever is left over goes out on the next tick.
+    """
     i = incidents.c
+    stop_at = time.monotonic() + budget
     with engine.connect() as conn:
         pending = [dict(r) for r in conn.execute(select(incidents).where(i.notify_state == "pending").limit(20)).mappings()]
     for inc in pending:
+        if time.monotonic() >= stop_at:
+            COUNTERS["webhook_deferred"] += 1
+            break
         if not s.webhooks or inc["severity"] == "info":
             state = "skipped"
         else:
             body = json.dumps(alert_payload(inc, s)).encode()
             delivered = [_post(s, url, body) for url in s.webhooks]
             state = "sent" if all(delivered) else "failed" if inc["notify_attempts"] >= 4 else "pending"
+            COUNTERS[f"webhook_{state}"] += 1
         # if the incident changed while we were sending, leave it pending so the newer state goes out too
         unchanged = sa.and_(i.id == inc["id"], i.status == inc["status"], i.title == inc["title"])
         with engine.begin() as conn:
@@ -449,7 +511,7 @@ def _post(s: Settings, url: str, body: bytes) -> bool:
         headers["X-Themis-Signature"] = sign(s.webhook_secret, body)
     try:
         check_webhook_url(url, s.webhook_allow_private)
-        return httpx.post(url, content=body, headers=headers, timeout=3.0, follow_redirects=False).is_success
+        return httpx.post(url, content=body, headers=headers, timeout=2.0, follow_redirects=False).is_success
     except (httpx.HTTPError, ValueError) as e:
         log.warning("webhook to %s failed: %s", url.split("?")[0], type(e).__name__)
         return False
@@ -468,27 +530,57 @@ def prune(engine: sa.Engine, s: Settings, now: float) -> None:
         conn.execute(sa.delete(audit_log).where(audit_log.c.at < now - 90 * 86400))
         first = int((now - s.scaled(slo.PERIOD)) // s.bucket_seconds)
         conn.execute(sa.delete(sli_buckets).where(sli_buckets.c.bucket < first))
+        conn.execute(sa.delete(edge_buckets).where(edge_buckets.c.bucket < int(old // s.bucket_seconds)))
 
 
 class Evaluator(threading.Thread):
-    """Runs tick() on a timer in whichever replica holds the lease. The others stand by and take over if it dies."""
+    """Runs tick() on a timer in whichever replica holds the lease. The others stand by and take over if it dies.
+
+    Followers check the lease every second (one cheap UPDATE), so when a leader shuts down cleanly and gives
+    its lease up, another replica takes over within about a second. A crashed leader cannot give it up: its
+    lease expires after three intervals, which is long enough that a slow tick never loses it by accident.
+    """
 
     def __init__(self, engine: sa.Engine, s: Settings):
         super().__init__(daemon=True, name="themis-evaluator")
         self.engine, self.s = engine, s
         self.stop = threading.Event()
         self.leader, self.ticks, self.last_tick = False, 0, 0.0
+        self.lag = self.tick_seconds = 0.0
+
+    @property
+    def lease_ttl(self) -> float:
+        return max(3 * self.s.eval_interval, 5.0)
 
     def run(self) -> None:
-        while not self.stop.wait(self.s.eval_interval):
+        while not self.stop.wait(min(1.0, self.s.eval_interval)):
             try:
                 now = time.time()
+                if self.leader and now - self.last_tick < self.s.eval_interval:
+                    continue  # leading, and not due yet: the lease was renewed at the last tick
                 with self.engine.begin() as conn:
-                    self.leader = take_lease(conn, "evaluator", self.s.instance, max(3 * self.s.eval_interval, 5.0), now)
+                    self.leader = take_lease(conn, "evaluator", self.s.instance, self.lease_ttl, now)
                 if self.leader:
-                    tick(self.engine, self.s, now)
+                    stats = tick(self.engine, self.s, now)
                     self.ticks, self.last_tick = self.ticks + 1, now
+                    self.lag, self.tick_seconds = stats["lag"], time.time() - now
                     if self.ticks % 200 == 1:
                         prune(self.engine, self.s, now)
+            except sa.exc.OperationalError as e:  # the database is down: say so once per tick, without a stack trace
+                log.warning("evaluator could not reach the database: %s", str(e.orig).splitlines()[0] if e.orig else e)
             except Exception:  # noqa: BLE001 - the loop must survive any single bad tick; the error is logged with its trace
                 log.exception("evaluator tick failed")
+
+    def shutdown(self, timeout: float = 10.0) -> None:
+        """Finish the tick in progress, then hand the lease over."""
+        self.stop.set()
+        if self.is_alive():
+            self.join(timeout)
+        if self.leader:
+            try:
+                with self.engine.begin() as conn:
+                    mine = sa.and_(leases.c.name == "evaluator", leases.c.holder == self.s.instance)
+                    conn.execute(update(leases).where(mine).values(expires=0.0))
+            except sa.exc.SQLAlchemyError:
+                log.warning("could not release the evaluator lease; it will expire on its own")
+            self.leader = False

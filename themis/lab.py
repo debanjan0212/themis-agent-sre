@@ -81,8 +81,8 @@ async def run_plan(http: httpx.AsyncClient, duration: float, log=print) -> list[
         done.append(mine)
         d = mine["result"]["detection"]
         log(f"        response: {d['response'] or 'none'}" + (f" after {d['seconds']}s" if d["detected"] else ""))
-        calm = await recover(http)
-        log("        fleet is calm again" if calm else "        fleet did not fully recover before the next experiment")
+        recovered = await recover(http)
+        log("        every agent is back within its budget" if recovered else "        not every agent recovered in time")
     return done
 
 

@@ -30,7 +30,7 @@ The conventions do not yet cover these. None is required. Each one you add makes
 | Attribute | On | Meaning |
 |---|---|---|
 | `themis.journey.name` | root span | A stable name for the kind of journey (`ship_change`) |
-| `themis.journey.outcome` | root span | `success`, `failed` or `blocked`. Use it when the result was wrong but nothing errored: a failed verification, a thumbs-down. Without it, the root span's status decides |
+| `themis.journey.outcome` | root span | `success`, `failed` or `blocked`. Use it when the result was wrong but nothing errored: a failed verification, a thumbs-down. Without it, the root span's status decides, except that `agent.run.status = escalated` (what agent-harness-sdk sets when a run hands its action to a person) reads as `blocked` |
 | `themis.blocked.by` | root span | `agent:<name>` when the journey was stopped because that agent is suspended |
 | `themis.handoff.from`, `themis.handoff.to` | a span around a handoff | Marks the span as a handoff between two agents |
 | `themis.handoff.valid` | handoff span | `false` when the payload failed the receiver's schema. The sender is blamed |
@@ -38,6 +38,7 @@ The conventions do not yet cover these. None is required. Each one you add makes
 | `themis.check.passed`, `themis.check.name` | any span | `false` when a check on this step failed: a result schema, a post-action verification |
 | `themis.check.blame` | with a failed check | `caller` when the agent misused the tool. Otherwise the tool is blamed |
 | `themis.gate.decision` | tool or handoff span | `deny` (outside the allow-list), `denied_by_human`, `approved_by_human` |
+| `themis.gate.reason` | tool or handoff span | why the runtime stopped the action, in a sentence. Root cause quotes it |
 | `themis.fallback` | model or tool span | `true` when the call went to the fallback because the first choice is quarantined |
 | `themis.cost.usd` | model span | The cost, if you already know it |
 

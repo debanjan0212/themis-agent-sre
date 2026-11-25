@@ -6,6 +6,7 @@ through hours of production time in milliseconds. Windows are the real ones: 1h 
 
 import dataclasses
 import json
+import time
 
 import pytest
 import sqlalchemy as sa
@@ -63,6 +64,13 @@ def test_a_journey_is_judged_once_with_cost_owner_and_components(engine, setting
     assert owners == {"model": "coder", "tool": "coder"}  # filled in from the parent agent span
     assert buckets(engine, "coder") == {"task_success": (1, 1), "handoff_success": (1, 1)}
     assert level(engine) == "autonomous"  # an agent Themis has never heard of is registered, trusted by default
+    uses = {(r["kind"], r["target"]): (r["calls"], r["errors"], round(r["cost"], 6)) for r in rows(engine, db.edge_buckets)}
+    assert uses == {
+        ("agent", ""): (1, 0, 0.0),
+        ("model", "sim-large"): (1, 0, 3.0),
+        ("tool", "repo.write"): (1, 0, 0.0),
+        ("handoff", "reviewer"): (1, 0, 0.0),
+    }
 
 
 def test_two_evaluators_cannot_count_the_same_journey_twice(engine, settings):
@@ -89,6 +97,33 @@ def test_a_late_second_root_span_does_not_judge_the_journey_again(engine, settin
     ev.tick(engine, settings, T0 + 70)
     assert len(rows(engine, db.journeys)) == 1 and buckets(engine, "coder") == {"task_success": (1, 1)}
     assert all(r["done"] for r in rows(engine, db.spans, db.spans.c.is_root))
+
+
+def test_one_trace_that_cannot_be_judged_does_not_stop_the_others(engine, settings, monkeypatch):
+    with engine.begin() as conn:
+        good, bad = simple(conn, T0), simple(conn, T0)
+    real = ev._judge
+
+    def judge(tid, root, ss):
+        if root["trace_id"] == bad.trace_id:
+            raise ValueError("an attribute nobody expected")
+        return real(tid, root, ss)
+
+    monkeypatch.setattr(ev, "_judge", judge)
+    before = ev.COUNTERS["traces_skipped"]
+    assert ev.tick(engine, settings, T0 + 1)["journeys"] == 2  # both claimed...
+    assert [j["trace_id"] for j in rows(engine, db.journeys)] == [good.trace_id]  # ...the good one judged
+    assert ev.COUNTERS["traces_skipped"] == before + 1
+    assert buckets(engine, "coder") == {"task_success": (1, 1)}  # the skipped trace counted for nothing
+    assert ev.tick(engine, settings, T0 + 2)["journeys"] == 0  # and it is not retried for ever
+
+
+def test_the_tick_reports_how_long_journeys_waited_to_be_judged(engine, settings):
+    with engine.begin() as conn:
+        simple(conn, T0 - 40)
+        simple(conn, T0 - 5)
+    assert ev.tick(engine, settings, T0)["lag"] == pytest.approx(40.0)
+    assert ev.tick(engine, settings, T0 + 1)["lag"] == 0.0  # nothing left waiting
 
 
 def test_cost_and_safety_indicators_follow_the_fleet_manifest(engine, settings):
@@ -353,6 +388,21 @@ def test_webhooks_to_private_addresses_are_refused_unless_allowed(engine, settin
         security.check_webhook_url("file:///etc/passwd", allow_private=True)
 
 
+def test_a_slow_receiver_cannot_hold_up_the_evaluator(engine, settings):
+    slow = Receiver(delay=1.5)
+    s = dataclasses.replace(settings, webhooks=(slow.url,), webhook_allow_private=True)
+    with engine.begin() as conn:
+        for i in range(5):
+            ev.open_incident(conn, "default", "agent_suspended", f"agent:a{i}", "critical", "t", {}, T0)
+    started = time.monotonic()
+    ev.notify(engine, s, budget=1.0)
+    took = time.monotonic() - started
+    slow.server.shutdown()
+    assert took < 3.5  # one delivery in flight when the budget ran out, not five
+    states = sorted(i["notify_state"] for i in rows(engine, db.incidents))
+    assert states.count("sent") == 1 and states.count("pending") == 4  # the rest go out on the next tick
+
+
 def test_a_failing_receiver_is_retried_then_given_up_on(engine, settings):
     down = Receiver(status=500)
     s = dataclasses.replace(settings, webhooks=(down.url,), webhook_allow_private=True)
@@ -376,3 +426,34 @@ def test_prune_drops_only_what_is_past_retention(engine, settings):
     ev.tick(engine, settings, T0)
     ev.prune(engine, settings, T0)
     assert len(rows(engine, db.journeys)) == 1 and {r["end"] > T0 - 3600 for r in rows(engine, db.spans)} == {True}
+
+
+def test_a_harness_run_that_handed_its_action_to_a_person_is_blocked_not_a_success():
+    """agent-harness-sdk marks such a run agent.run.status=escalated on an otherwise healthy root span."""
+
+    def s(sid, parent, kind, ok=True, **attrs):
+        return dict(
+            trace_id="t1",
+            span_id=sid,
+            parent_id=parent,
+            kind=kind,
+            name=sid,
+            agent="deployer",
+            target=None,
+            ok=ok,
+            start=1.0,
+            end=2.0,
+            error_type=None,
+            cost=None,
+            input_tokens=0,
+            output_tokens=0,
+            attrs=attrs,
+        )
+
+    root = s("root", None, "agent", **{"agent.run.status": "escalated"})
+    why = "Themis has suspended deployer, so a person must take this action"
+    denied = s("t", "root", "tool", ok=False, **{"themis.gate.decision": "deny", "themis.gate.reason": why})
+    denied["target"] = "rollback"
+    judged = ev._judge("tenant", root, [root, denied])
+    assert judged["outcome"] == "blocked" and judged["culprit"] == "agent:deployer" and why in judged["culprit_reason"]
+    assert ev._judge("tenant", dict(root, attrs={"agent.run.status": "completed"}), [root])["outcome"] == "success"

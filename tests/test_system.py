@@ -5,17 +5,23 @@ Nothing is mocked here. These are the slow tests (about a minute together) and t
 
 import asyncio
 import json
+import os
+import threading
+import time
 
 import httpx
+import pytest
+import sqlalchemy as sa
 
-from tests.conftest import Receiver, free_port, journey, wait_for
+from tests.conftest import PG_URL, DatabaseOutage, Receiver, free_port, journey, wait_for
+from themis import db
 from themis.lab import Lab
 from themis.world.sim import World
 
 
 def test_two_replicas_share_the_work_and_survive_losing_the_leader(db_url):
     fast = dict(eval_interval=0.2, settle_seconds=0.2)
-    labs = [Lab(db_url, free_port(), 120.0, instance=f"replica-{i}", **fast).start() for i in range(2)]
+    labs = [Lab(db_url, free_port(), 120.0, **fast).start() for _ in range(2)]
     try:
 
         def one_leader():
@@ -34,12 +40,34 @@ def test_two_replicas_share_the_work_and_survive_losing_the_leader(db_url):
         httpx.post(f"{follower.url}/v1/traces", content=body, headers=auth).raise_for_status()
         wait_for(lambda: judged(leader, trace_id) and judged(follower, trace_id), 10, "the journey to be judged")
 
-        leader.stop()  # the leader dies
+        stopped = time.monotonic()
+        leader.stop()  # a rolling deploy: the leader shuts down cleanly and hands its lease over
         wait_for(lambda: follower.app.state.evaluator.leader, 15, "the follower to take over the lease")
+        handover = time.monotonic() - stopped
+        # without the handover the follower would wait for the lease to expire (lease_ttl, 5s here)
+        assert handover < follower.app.state.evaluator.lease_ttl / 2, f"took {handover:.1f}s"
         trace_id, body = journey()
         httpx.post(f"{follower.url}/v1/traces", content=body, headers=auth).raise_for_status()
         wait_for(lambda: judged(follower, trace_id), 10, "the survivor to judge new journeys")
         assert httpx.get(f"{follower.url}/readyz").json() == {"ok": True, "leader": True}
+    finally:
+        for lab in labs:
+            lab.stop()
+
+
+def test_two_replicas_with_the_same_configured_name_never_both_lead(db_url, monkeypatch):
+    """A Deployment that sets THEMIS_INSTANCE to one fixed value must still have exactly one leader."""
+    from themis.settings import Settings
+
+    monkeypatch.setenv("THEMIS_INSTANCE", "themis")
+    a, b = Settings.from_env(), Settings.from_env()
+    assert a.instance != b.instance and a.instance.startswith("themis-")
+    labs = [Lab(db_url, free_port(), 120.0, eval_interval=0.2, settle_seconds=0.2).start() for _ in range(2)]
+    try:
+        wait_for(lambda: any(lab.app.state.evaluator.leader for lab in labs), 10, "a leader")
+        for _ in range(15):  # watch it for a while: never two at once
+            assert sum(lab.app.state.evaluator.leader for lab in labs) == 1
+            time.sleep(0.2)
     finally:
         for lab in labs:
             lab.stop()
@@ -63,7 +91,7 @@ def test_the_fleet_contains_a_rogue_agent_and_a_poisoned_one(db_url):
         await asyncio.sleep(10)
         async with lab.http() as http:
             before = (await http.get("/api/overview")).json()
-            for fault, target, intensity in (("rogue_agent", "agent:deployer", 0.3), ("context_poison", "agent:researcher", 0.6)):
+            for fault, target, intensity in (("rogue_agent", "agent:deployer", 0.4), ("context_poison", "agent:researcher", 0.6)):
                 body = {"fault": fault, "target": target, "intensity": intensity, "duration_s": 20}
                 (await http.post("/api/experiments", json=body)).raise_for_status()
             for _ in range(60):
@@ -124,3 +152,74 @@ def test_the_fleet_contains_a_rogue_agent_and_a_poisoned_one(db_url):
         a for a in alerts if a["labels"]["themis_subject"] == "agent:researcher" and a["labels"]["severity"] == "critical"
     ]
     assert suspended and suspended[0]["status"] == "firing" and suspended[0]["labels"]["service"] == "researcher"
+
+
+def test_spans_sent_during_a_database_outage_are_not_lost(db_url):
+    """The real OpenTelemetry SDK and exporter, a database that disappears for 4 seconds, and nothing dropped."""
+    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
+    lab = Lab(db_url, free_port(), 120.0, eval_interval=0.3, settle_seconds=0.2).start()
+    outage = DatabaseOutage(lab.engine)
+    provider = TracerProvider()
+    exporter = OTLPSpanExporter(endpoint=f"{lab.url}/v1/traces", headers={"Authorization": f"Bearer {lab.key}"})
+    provider.add_span_processor(BatchSpanProcessor(exporter, schedule_delay_millis=200))
+    tracer = provider.get_tracer("outage-test")
+    try:
+        with outage:
+            for i in range(40):
+                attrs = {"themis.journey.name": "during_outage", "session.id": f"s{i}"}
+                with tracer.start_as_current_span("journey", attributes=attrs):
+                    with tracer.start_as_current_span(
+                        "invoke", attributes={"gen_ai.operation.name": "invoke_agent", "gen_ai.agent.name": "a"}
+                    ):
+                        pass
+            time.sleep(4)  # the exporter is retrying all this time
+        provider.force_flush()
+        auth = {"Authorization": f"Bearer {lab.key}"}
+        judged = wait_for(
+            lambda: len(js := httpx.get(f"{lab.url}/api/journeys?limit=100", headers=auth).json()["journeys"]) == 40 and js,
+            15,
+            "all 40 journeys to arrive and be judged",
+        )
+        assert {j["name"] for j in judged} == {"during_outage"}
+        metrics = httpx.get(f"{lab.url}/metrics").text
+        assert 'http_route="/v1/traces",http_request_method="POST",http_response_status_code="503"' in metrics  # refused at first
+    finally:
+        provider.shutdown()
+        lab.stop()
+
+
+@pytest.mark.skipif(not PG_URL, reason="needs THEMIS_TEST_PG_URL")
+def test_replicas_that_start_together_on_an_empty_database_all_come_up():
+    """Found by the soak: three replicas starting at once raced to create the tables, and two of them crashed."""
+    schema = "themis_race_" + os.urandom(4).hex()
+    admin = sa.create_engine(PG_URL)
+    with admin.begin() as conn:
+        conn.execute(sa.text(f"CREATE SCHEMA {schema}"))
+    url = sa.engine.make_url(PG_URL).update_query_dict({"options": f"-csearch_path={schema}"})
+    start, errors, engines = threading.Barrier(4), [], []
+
+    def replica():
+        start.wait()
+        try:
+            engines.append(db.make_engine(url.render_as_string(hide_password=False)))
+        except Exception as e:  # noqa: BLE001 - the test reports whatever went wrong
+            errors.append(e)
+
+    threads = [threading.Thread(target=replica) for _ in range(4)]
+    try:
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(60)
+        assert errors == [] and len(engines) == 4
+        with engines[0].connect() as conn:
+            assert set(sa.inspect(conn).get_table_names()) == set(db.md.tables)
+    finally:
+        for e in engines:
+            e.dispose()
+        with admin.begin() as conn:
+            conn.execute(sa.text(f"DROP SCHEMA {schema} CASCADE"))
+        admin.dispose()
