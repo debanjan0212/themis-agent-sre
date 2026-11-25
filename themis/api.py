@@ -501,6 +501,7 @@ def create_app(settings: Settings | None = None, engine: sa.Engine | None = None
                 raise HTTPException(404, "no such agent")
             ev.set_autonomy(conn, p.tenant_id, name, old, body.level, body.reason, f"key:{p.key_id}", now)
             audit(conn, p.tenant_id, f"key:{p.key_id}", "autonomy.set", {"agent": name, "from": old, **body.model_dump()}, now)
+        cache.pop(("snapshot", p.tenant_id), None)  # this replica's runtimes see a person's decision on their next sync
         return {"agent": name, "autonomy": body.level}
 
     @app.post("/api/experiments", status_code=201)
@@ -564,6 +565,7 @@ def create_app(settings: Settings | None = None, engine: sa.Engine | None = None
                     row = dict(tenant_id=p.tenant_id, name=name, autonomy="autonomous", since=now, config=config)
                     conn.execute(insert(agents).values(**row))
             audit(conn, p.tenant_id, f"key:{p.key_id}", "fleet.apply", {"agents": sorted(body.agents)}, now)
+        cache.pop(("snapshot", p.tenant_id), None)
         return {"agents": len(body.agents)}
 
     @app.post("/api/keys", status_code=201)
