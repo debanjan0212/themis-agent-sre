@@ -666,26 +666,35 @@ function incidents() {
 
 // ---------------------------------------------------------------- routing
 
-// A Map, not an object: the name comes from the address bar, and on a plain object "constructor" or "__proto__"
-// would find an inherited method and call it.
-const pages = new Map([
-  ["", fleet],
-  ["journeys", journeys],
-  ["agents", agents],
-  ["chaos", chaos],
-  ["incidents", incidents],
-]);
+// The page name comes from the address bar, so it is never used to look anything up: a plain switch means no
+// input can reach an inherited method such as "constructor", or anything else that is not listed here.
+const PAGE_NAMES = ["journeys", "agents", "chaos", "incidents"];
+
+function pageFor(name) {
+  switch (name) {
+    case "journeys":
+      return journeys;
+    case "agents":
+      return agents;
+    case "chaos":
+      return chaos;
+    case "incidents":
+      return incidents;
+    default:
+      return fleet;
+  }
+}
 
 function route() {
   clearInterval(timer);
   const [name, arg] = location.hash.replace(/^#\/?/, "").split("/");
   for (const a of document.querySelectorAll("#nav a")) {
-    if (a.getAttribute("href") === `#/${pages.has(name) ? name : ""}`) a.setAttribute("aria-current", "page");
+    if (a.getAttribute("href") === `#/${PAGE_NAMES.includes(name) ? name : ""}`) a.setAttribute("aria-current", "page");
     else a.removeAttribute("aria-current");
   }
   view.replaceChildren();
   if (!key) return askForKey();
-  (pages.get(name) || fleet)(arg ? decodeURIComponent(arg) : undefined);
+  pageFor(name)(arg ? decodeURIComponent(arg) : undefined);
 }
 
 // `themis demo` prints a link with the key in the fragment. A fragment is never sent to the server; take the
