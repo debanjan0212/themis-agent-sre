@@ -1,0 +1,55 @@
+# An OpenTelemetry Collector in front of Themis, for when spans must survive a long outage.
+#
+# Agents' own exporters retry for 10 seconds and then drop the batch. docs/RELIABILITY.md shows that covers a
+# crashed replica, a rolling deploy and a short database outage. For anything longer, send agents' spans to
+# this Collector instead: it keeps them on disk and keeps retrying for 30 minutes.
+#
+#   agents  --OTLP-->  collector (disk queue)  --OTLP/HTTP-->  Themis
+#
+# Run it with otelcol-contrib (the file_storage extension is in contrib) as a DaemonSet or sidecar, with a
+# volume mounted at /var/lib/otelcol, and THEMIS_INGEST_KEY from a Secret.
+extensions:
+  file_storage/queue:
+    directory: /var/lib/otelcol/queue
+    create_directory: true
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 80
+    spike_limit_percentage: 25
+  batch:
+    send_batch_size: 2000
+    timeout: 2s
+
+exporters:
+  otlphttp/themis:
+    endpoint: http://themis.platform.svc.cluster.local:8600 # the exporter adds /v1/traces
+    headers:
+      Authorization: Bearer ${env:THEMIS_INGEST_KEY}
+    compression: gzip
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 30s
+      max_elapsed_time: 30m
+    sending_queue:
+      enabled: true
+      storage: file_storage/queue # on disk: survives a Collector restart, not only a Themis outage
+      queue_size: 5000
+
+service:
+  extensions: [file_storage/queue]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlphttp/themis]

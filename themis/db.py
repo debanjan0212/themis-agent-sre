@@ -105,6 +105,23 @@ sli_buckets = Table(
     Column("total", Integer, nullable=False),
 )
 
+# What uses what, per time bucket, written when journeys are judged. The fleet map sums these few rows instead of
+# scanning every span of the last half hour, so its cost does not grow with traffic.
+edge_buckets = Table(
+    "edge_buckets",
+    md,
+    Column("tenant_id", String(40), primary_key=True),
+    Column("agent", String(120), primary_key=True),
+    Column("kind", String(12), primary_key=True),  # agent | model | tool | handoff
+    Column("target", String(160), primary_key=True),  # "" for the agent's own tasks
+    Column("bucket", sa.BigInteger, primary_key=True),
+    Column("calls", Integer, nullable=False),
+    Column("errors", Integer, nullable=False),
+    Column("seconds", Float, nullable=False),
+    Column("cost", Float, nullable=False),
+    Column("pod", String(160)),
+)
+
 quarantine = Table(
     "quarantine",
     md,
@@ -223,7 +240,8 @@ def make_engine(url: str) -> sa.Engine:
             cur.close()
 
     else:
-        engine = sa.create_engine(url, pool_size=10, max_overflow=10, pool_pre_ping=True)
+        # pool_timeout: when every connection is busy, wait 5s and then answer 503 (try again) rather than pile up
+        engine = sa.create_engine(url, pool_size=10, max_overflow=10, pool_timeout=5, pool_pre_ping=True)
     md.create_all(engine)
     return engine
 

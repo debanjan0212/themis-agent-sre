@@ -51,7 +51,9 @@ class Settings:
             bootstrap_key=e("THEMIS_BOOTSTRAP_KEY", ""),
             cors_origins=_list("THEMIS_CORS_ORIGINS"),
             external_url=e("THEMIS_EXTERNAL_URL", cls.external_url).rstrip("/"),
-            instance=e("THEMIS_INSTANCE", "") or f"{socket.gethostname()}-{uuid.uuid4().hex[:6]}",
+            # The lease holder must be unique per process, or two replicas could both believe they lead. So the
+            # configured name is only a readable prefix: a random part is always added.
+            instance=f"{e('THEMIS_INSTANCE', '') or socket.gethostname()}-{uuid.uuid4().hex[:8]}",
         )
         values.update(override)
         return cls(**values)

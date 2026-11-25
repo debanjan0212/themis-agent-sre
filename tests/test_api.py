@@ -9,7 +9,7 @@ import time
 import pytest
 import sqlalchemy as sa
 
-from tests.conftest import Api, journey, otlp
+from tests.conftest import Api, DatabaseOutage, journey, otlp
 from themis import api as api_module
 from themis import db
 
@@ -251,3 +251,69 @@ def test_metrics_escape_hostile_agent_names(api):
     text = api.http.get("/metrics", headers=api.auth("read")).text
     lines = [line for line in text.splitlines() if line.startswith("themis_agent_autonomy")]
     assert len(lines) == 1 and '\\"' in lines[0]  # one sample, not the two the name tried to forge
+
+
+# ---------------------------------------------------------------- when the database is down
+
+
+def test_a_database_outage_answers_retry_later_everywhere_and_recovers_by_itself(api):
+    """503 + Retry-After is what makes OTLP exporters and the gate client try again. A 500 makes an exporter drop spans."""
+    outage = DatabaseOutage(api.engine)
+    _, body = journey()
+    with outage:
+        for r in (
+            api.ingest(body),
+            api.http.get("/api/overview", headers=api.auth("read")),
+            api.http.get("/v1/approvals/x", headers=api.auth("ingest")),
+            api.http.get("/readyz"),  # Kubernetes takes the pod out of the Service; nothing is restarted
+        ):
+            assert r.status_code == 503, r.text
+        assert api.ingest(body).headers["retry-after"] == "2"
+        assert api.http.get("/healthz").status_code == 200  # the process is fine, so the liveness probe passes
+    assert api.ingest(body).status_code == 200  # no restart needed
+    assert api.http.get("/readyz").status_code == 200
+
+
+def test_metrics_report_latency_per_route_template_not_per_path(api):
+    """Named the way OpenTelemetry names HTTP server metrics, so the SLO alerts IntentOps renders can read them."""
+    api.http.get("/api/agents/coder", headers=api.auth("read"))
+    api.http.get("/api/agents/somebody-else", headers=api.auth("read"))
+    api.http.get("/app.js")
+    text = api.http.get("/metrics").text
+    tag = 'http_route="/api/agents/{name}",http_request_method="GET",http_response_status_code="404"'
+    assert f"http_server_request_duration_seconds_count{{{tag}}} 2" in text
+    assert f'http_server_request_duration_seconds_bucket{{{tag},le="+Inf"}} 2' in text
+    assert 'http_route="/api/agents/coder"' not in text and 'http_route="static"' in text
+    assert "themis_evaluator_lag_seconds" in text and 'themis_webhook_deliveries_total{result="sent"}' in text
+
+
+def test_every_metric_the_committed_alert_rules_read_is_one_themis_emits(api):
+    """deploy/kubernetes/slo-rules.yaml (rendered by IntentOps) and deploy/alerts.yaml must read real metrics.
+
+    Before this test existed, the SLO rules read a metric Themis did not emit, so they could never fire.
+    """
+    import re
+    from pathlib import Path
+
+    import yaml
+
+    api.http.get("/api/overview", headers=api.auth("read"))
+    api.http.get("/api/overview")  # a 401, so there is a 4xx series too
+    exposed = {line.split("{")[0].split(" ")[0] for line in api.http.get("/metrics").text.splitlines() if line and line[0] != "#"}
+    deploy = Path(__file__).parent.parent / "deploy"
+    rules = []
+    for path in (deploy / "kubernetes" / "slo-rules.yaml", deploy / "alerts.yaml"):
+        for group in yaml.safe_load(path.read_text())["spec"]["groups"]:
+            rules += group["rules"]
+    recorded = {r["record"] for r in rules if "record" in r}
+    read = set()
+    for r in rules:
+        for name in re.findall(r"([a-z_:][a-z0-9_:]*)\s*(?:\{|\[)", r["expr"]):
+            read.add(re.sub(r"_(bucket|count|sum)$", "", name) if name.startswith("http_server") else name)
+    unknown = {
+        m for m in read - recorded if m not in {re.sub(r"_(bucket|count|sum)$", "", e) for e in exposed} and m not in exposed
+    }
+    assert not unknown, f"alert rules read metrics Themis never emits: {sorted(unknown)}"
+    assert "http_server_request_duration_seconds" in read  # the IntentOps SLO rules really are covered
+    labels = re.search(r"http_server_request_duration_seconds_count\{([^}]*)\}", api.http.get("/metrics").text).group(1)
+    assert "http_response_status_code=" in labels  # the label the error-ratio rules filter on

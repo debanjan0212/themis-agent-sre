@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 import uuid
@@ -19,11 +20,12 @@ from typing import Literal
 import sqlalchemy as sa
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import func, insert, select, update
 
-from themis import chaos, otlp, slo
+from themis import __version__, chaos, otlp, slo
 from themis import engine as ev
 from themis.db import (
     agents,
@@ -32,6 +34,7 @@ from themis.db import (
     audit,
     audit_log,
     autonomy_events,
+    edge_buckets,
     experiments,
     gate_events,
     incidents,
@@ -48,6 +51,13 @@ from themis.settings import Settings
 WEB = Path(__file__).parent / "web"
 CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'"
 APPROVAL_TTL = 300.0  # real seconds a go / no-go request waits for a human before it expires
+# Database trouble is temporary by nature. Answering 503 + Retry-After makes OTLP exporters and the gate client
+# try again; a 500 would make an exporter drop the spans. The OpenTelemetry exporters give up 10 seconds after
+# the first attempt, so "Retry-After: 2" lets their retries cover an outage of about 8 seconds. For longer
+# outages, put an OpenTelemetry Collector with a persistent queue in front (deploy/otel-collector.yaml).
+RETRY_AFTER = "2"
+DB_UNAVAILABLE = (sa.exc.OperationalError, sa.exc.InterfaceError, sa.exc.TimeoutError, sa.exc.DisconnectionError)
+LATENCY_BUCKETS = (0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0)
 
 
 class AutonomyBody(BaseModel):
@@ -145,25 +155,53 @@ def create_app(settings: Settings | None = None, engine: sa.Engine | None = None
     async def lifespan(_: FastAPI):
         evaluator.start()
         yield
-        evaluator.stop.set()
+        await asyncio.to_thread(evaluator.shutdown, s.eval_interval + 5)  # hand the lease over before exiting
 
     # no built-in docs pages: they load scripts from a CDN, which the CSP forbids, and they are one more public route
-    app = FastAPI(title="Themis", version="0.1.0", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+    app = FastAPI(title="Themis", version=__version__, lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.engine, app.state.settings, app.state.evaluator = engine, s, evaluator
     if s.cors_origins:
         app.add_middleware(
             CORSMiddleware, allow_origins=list(s.cors_origins), allow_methods=["*"], allow_headers=["Authorization"]
         )
 
+    for db_error in DB_UNAVAILABLE:
+
+        @app.exception_handler(db_error)
+        async def database_unavailable(request: Request, exc: Exception):
+            body = {"detail": "database unavailable, try again"}
+            return JSONResponse(body, status_code=503, headers={"Retry-After": RETRY_AFTER})
+
+    # Themis's own SLIs, under the OpenTelemetry HTTP semantic-convention name (http.server.request.duration).
+    # The SLO alerts IntentOps renders into deploy/kubernetes/slo-rules.yaml read exactly this metric.
+    # Updated only from the middleware, which runs on the event loop, so no lock is needed.
+    http_hist: dict[tuple[str, str, int], list[float]] = defaultdict(lambda: [0] * (len(LATENCY_BUCKETS) + 2))
+
+    def observe(route: str, method: str, status: int, seconds: float) -> None:
+        row = http_hist[(route, method, status)]
+        for i, edge in enumerate(LATENCY_BUCKETS):
+            if seconds <= edge:
+                row[i] += 1
+        row[-2] += 1
+        row[-1] += seconds
+
     @app.middleware("http")
     async def hardening(request: Request, call_next):
+        started = time.perf_counter()
         length = request.headers.get("content-length")
         if length is not None and (not length.isdigit() or int(length) > s.max_body_bytes):
+            observe("rejected", request.method, 413, time.perf_counter() - started)
             return Response("request too large", status_code=413)
         # every other body is parsed by the framework, so it must announce its size; /v1/traces counts bytes itself
         if request.method in ("POST", "PUT") and length is None and request.url.path != "/v1/traces":
+            observe("rejected", request.method, 411, time.perf_counter() - started)
             return Response("Content-Length required", status_code=411)
-        response = await call_next(request)
+        try:
+            response = await call_next(request)
+        except Exception:
+            observe(_route(request), request.method, 500, time.perf_counter() - started)
+            raise
+        observe(_route(request), request.method, response.status_code, time.perf_counter() - started)
         response.headers.update(
             {
                 "X-Content-Type-Options": "nosniff",
@@ -575,7 +613,32 @@ def create_app(settings: Settings | None = None, engine: sa.Engine | None = None
             f"themis_evaluator_leader {int(evaluator.leader)}",
             "# TYPE themis_evaluator_last_tick_age_seconds gauge",
             f"themis_evaluator_last_tick_age_seconds {now - evaluator.last_tick if evaluator.last_tick else -1:.1f}",
+            "# HELP themis_evaluator_lag_seconds how long the oldest finished journey waited to be judged, at the last tick",
+            "# TYPE themis_evaluator_lag_seconds gauge",
+            f"themis_evaluator_lag_seconds {evaluator.lag:.2f}",
+            "# TYPE themis_evaluator_tick_seconds gauge",
+            f"themis_evaluator_tick_seconds {evaluator.tick_seconds:.3f}",
+            "# TYPE themis_evaluator_interval_seconds gauge",
+            f"themis_evaluator_interval_seconds {s.eval_interval}",
+            "# TYPE themis_journeys_judged_total counter",
+            f"themis_journeys_judged_total {ev.COUNTERS['journeys_judged']}",
+            "# TYPE themis_traces_skipped_total counter",
+            f"themis_traces_skipped_total {ev.COUNTERS['traces_skipped']}",
+            "# TYPE themis_webhook_deliveries_total counter",
+            *[
+                f'themis_webhook_deliveries_total{{result="{r}"}} {ev.COUNTERS[f"webhook_{r}"]}'
+                for r in ("sent", "pending", "failed", "skipped", "deferred")
+            ],
+            "# HELP http_server_request_duration_seconds Duration of HTTP server requests",
+            "# TYPE http_server_request_duration_seconds histogram",
         ]
+        for (route, method, status), row in sorted(http_hist.items()):
+            tag = f'http_route="{route}",http_request_method="{method}",http_response_status_code="{status}"'
+            for edge, n in zip(LATENCY_BUCKETS, row, strict=False):
+                lines.append(f'http_server_request_duration_seconds_bucket{{{tag},le="{edge}"}} {n}')
+            lines.append(f'http_server_request_duration_seconds_bucket{{{tag},le="+Inf"}} {row[-2]}')
+            lines.append(f"http_server_request_duration_seconds_sum{{{tag}}} {row[-1]:.4f}")
+            lines.append(f"http_server_request_duration_seconds_count{{{tag}}} {row[-2]}")
         if authorization:
             p = need("read")(authorization)  # a bad key is still a 401, never a silent downgrade
             with engine.connect() as conn:
@@ -598,6 +661,14 @@ def create_app(settings: Settings | None = None, engine: sa.Engine | None = None
 
     app.mount("/", StaticFiles(directory=WEB, html=True), name="web")
     return app
+
+
+def _route(request: Request) -> str:
+    """The route template ("/api/agents/{name}"), never the raw path, so the metric's label set stays small.
+    Methods come from the route table too, so a client cannot invent label values with odd methods."""
+    route = request.scope.get("route")
+    path = getattr(route, "path", "")
+    return path if path and not isinstance(getattr(route, "app", None), StaticFiles) else "static"
 
 
 def _label(value: str) -> str:
@@ -629,18 +700,29 @@ def _overview(engine: sa.Engine, s: Settings, tid: str, evaluator: ev.Evaluator)
     now = time.time()
     live = max(s.scaled(1800), 15.0)  # "right now" for the map: 30 minutes in production, at least 15 seconds
     with engine.connect() as conn:
+        # Vitals: counts and shares over the window, in SQL; percentiles from the latest 2,000 journeys.
+        # Both stay cheap however much traffic the window holds.
         j = journeys.c
-        recent = conn.execute(
-            select(j.start, j.end, j.outcome, j.cost, j.tokens).where(j.tenant_id == tid, j.end >= now - live)
-        ).all()
+        window = sa.and_(j.tenant_id == tid, j.end >= now - live)
+        of = lambda outcome: func.sum(sa.case((j.outcome == outcome, 1), else_=0))  # noqa: E731
+        n, ok_n, failed_n, blocked_n, cost, tokens = conn.execute(
+            select(func.count(), of("success"), of("failed"), of("blocked"), func.sum(j.cost), func.sum(j.tokens)).where(window)
+        ).one()
+        latest = conn.execute(select(j.start, j.end).where(window).order_by(j.end.desc()).limit(2000)).all()
         found = ev.agent_statuses(conn, s, tid, now)
-        sp = spans.c
-        errors = func.sum(sa.case((sp.ok, 0), else_=1))
+        eb = edge_buckets.c
+        first = int((now - live) // s.bucket_seconds)
         q = select(
-            sp.agent, sp.kind, sp.target, func.count(), errors, func.avg(sp.end - sp.start), func.sum(sp.cost), func.max(sp.pod)
+            eb.agent,
+            eb.kind,
+            eb.target,
+            func.sum(eb.calls),
+            func.sum(eb.errors),
+            func.sum(eb.seconds),
+            func.sum(eb.cost),
+            func.max(eb.pod),
         )
-        q = q.where(sp.tenant_id == tid, sp.end >= now - live, sp.agent.is_not(None), sp.kind != "other")
-        edges_raw = conn.execute(q.group_by(sp.agent, sp.kind, sp.target)).all()
+        edges_raw = conn.execute(q.where(eb.tenant_id == tid, eb.bucket >= first).group_by(eb.agent, eb.kind, eb.target)).all()
         qz = quarantine.c
         held = (
             conn.execute(select(qz.component, qz.until, qz.reason, qz.strikes).where(qz.tenant_id == tid, qz.active))
@@ -660,7 +742,14 @@ def _overview(engine: sa.Engine, s: Settings, tid: str, evaluator: ev.Evaluator)
             select(e.at, e.agent, e.old, e.new, e.reason, e.actor).where(e.tenant_id == tid).order_by(e.at.desc()).limit(25)
         )
         events = [
-            {"at": at, "kind": "autonomy", "text": f"{ag}: {old} → {new}", "detail": reason, "actor": actor, "level": new}
+            {
+                "at": at,
+                "kind": "autonomy",
+                "text": f"{ag} moved from {old} to {new}",
+                "detail": reason,
+                "actor": actor,
+                "level": new,
+            }
             for at, ag, old, new, reason, actor in moves
         ]
         for comp, since, reason in conn.execute(
@@ -674,17 +763,18 @@ def _overview(engine: sa.Engine, s: Settings, tid: str, evaluator: ev.Evaluator)
         ):
             events.append({"at": at, "kind": "chaos", "text": f"chaos started: {name}", "detail": "", "level": "chaos"})
 
-    n = len(recent)
-    durations = sorted((end - start) * 1000 for start, end, *_ in recent)
-    share = {o: (sum(1 for r in recent if r[2] == o) / n if n else None) for o in ("success", "failed", "blocked")}
+    n = n or 0
+    durations = sorted((end - start) * 1000 for start, end in latest)
+    share = {o: (c or 0) / n if n else None for o, c in (("success", ok_n), ("failed", failed_n), ("blocked", blocked_n))}
     per_agent: dict[str, dict] = defaultdict(lambda: {"tasks": 0, "errors": 0, "avg_ms": None, "cost": 0.0, "pod": None})
     edges = []
-    for agent, kind, target, count, errs, avg, cost, pod in edges_raw:
+    for agent, kind, target, count, errs, seconds, spent, pod in edges_raw:
+        avg = (seconds or 0.0) / count if count else 0.0
         row = per_agent[agent]
-        row["cost"] += cost or 0.0
+        row["cost"] += spent or 0.0
         row["pod"] = row["pod"] or pod
         if kind == "agent":
-            row.update(tasks=count, errors=int(errs or 0), avg_ms=round((avg or 0) * 1000, 1))
+            row.update(tasks=count, errors=int(errs or 0), avg_ms=round(avg * 1000, 1))
         elif target:
             edges.append(
                 {
@@ -705,10 +795,10 @@ def _overview(engine: sa.Engine, s: Settings, tid: str, evaluator: ev.Evaluator)
             "journeys": n,
             "per_min": round(n / (live / 60), 1),
             **share,
-            "p50_ms": round(durations[n // 2], 1) if n else None,
-            "p95_ms": round(durations[min(n - 1, int(n * 0.95))], 1) if n else None,
-            "cost_per_min": round(sum(r[3] or 0 for r in recent) / (live / 60), 5),
-            "tokens_per_min": round(sum(r[4] or 0 for r in recent) / (live / 60)),
+            "p50_ms": round(durations[len(durations) // 2], 1) if durations else None,
+            "p95_ms": round(durations[min(len(durations) - 1, int(len(durations) * 0.95))], 1) if durations else None,
+            "cost_per_min": round((cost or 0.0) / (live / 60), 5),
+            "tokens_per_min": round((tokens or 0) / (live / 60)),
         },
         "agents": [{**_agent(a_row, statuses), **per_agent.get(name, {})} for name, (a_row, statuses) in found.items()],
         "edges": edges,

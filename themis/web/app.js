@@ -35,7 +35,7 @@ const ago = (t) => {
   const d = Math.max(0, Date.now() / 1000 - t);
   return d < 90 ? `${Math.round(d)}s ago` : d < 5400 ? `${Math.round(d / 60)} min ago` : `${Math.round(d / 3600)} h ago`;
 };
-const chip = (text, tone) => h("span", { class: `chip ${tone || text}` }, text);
+const chip = (text, tone) => h("span", { class: `state ${tone || text}` }, text);
 
 async function api(path, opts = {}) {
   const headers = { Authorization: `Bearer ${key}` };
@@ -82,7 +82,7 @@ function askForKey(message) {
   view.replaceChildren(
     h(
       "div",
-      { class: "panel stack", style: { maxWidth: "34rem", margin: "4rem auto" } },
+      { class: "signin stack" },
       h("h1", {}, "Open the dashboard"),
       h("p", { class: "mute" }, message || "Paste an API key. `themis demo` prints a link that already contains one; `themis key` creates one."),
       h("div", { class: "row" }, input, h("button", { class: "go", onclick: open }, "Open dashboard")),
@@ -217,7 +217,7 @@ function fleet() {
           if (!to) return null;
           const mid = [((from[0] + to[0]) / 2) * 0.72, ((from[1] + to[1]) / 2) * 0.72];
           const d = `M${from[0]},${from[1]} Q${mid[0]},${mid[1]} ${to[0]},${to[1]}`;
-          return s("path", { class: `edge flow ${bad ? "bad" : ""}`, d, stroke: hue(e.from), "stroke-opacity": 0.35 + strength * 0.5, "stroke-width": 1.6 });
+          return s("path", { class: `edge ${bad ? "bad" : ""}`, d, stroke: hue(e.from), "stroke-opacity": 0.35 + strength * 0.5, "stroke-width": 1.6 });
         }
         const deg = depAngles.get(`${e.kind}:${e.to}`);
         if (deg == null) return null;
@@ -258,7 +258,7 @@ function fleet() {
     );
     feed.replaceChildren(
       ...(o.events.length
-        ? o.events.map((e) => h("li", {}, h("time", {}, clock(e.at)), chip(e.kind, e.level), " ", e.text, e.detail ? h("div", { class: "mute" }, e.detail) : null))
+        ? o.events.map((e) => h("li", {}, h("time", {}, clock(e.at)), e.text, e.detail ? h("div", { class: "mute" }, e.detail) : null))
         : [h("li", { class: "empty" }, "Nothing yet. Demotions, quarantines and chaos experiments will show up here.")]),
     );
   });
@@ -266,9 +266,9 @@ function fleet() {
 
 function showStatus(o) {
   statusBar.replaceChildren(
-    o.window_scale !== 1 ? h("span", { class: "chip", title: "SLO windows are compressed for the demo" }, `time ×${o.window_scale}`) : null,
-    h("a", { class: `chip ${o.pending_approvals ? "pending" : ""}`, href: "#/incidents" }, `${o.pending_approvals} waiting for a human`),
-    h("a", { class: `chip ${o.open_incidents ? "open" : ""}`, href: "#/incidents" }, `${o.open_incidents} open incidents`),
+    o.window_scale !== 1 ? h("span", { title: "SLO windows are compressed for the demo" }, `Time runs ${o.window_scale} times faster`) : null,
+    h("a", { href: "#/incidents" }, h("span", { class: o.pending_approvals ? "lit" : "" }, o.pending_approvals), " waiting for a human"),
+    h("a", { href: "#/incidents" }, h("span", { class: o.open_incidents ? "lit" : "" }, o.open_incidents), " open incidents"),
   );
 }
 
@@ -371,8 +371,8 @@ function journeys(openId) {
           d.uses.map((u) =>
             h(
               "div",
-              { style: { borderLeftColor: hue(u.agent) } },
-              h("strong", {}, u.agent),
+              {},
+              h("strong", {}, h("span", { class: "dot", style: { background: hue(u.agent) } }), u.agent),
               h("div", { class: "mute" }, u.pod ? `${u.pod} on ${u.node || "?"}` : "pod not reported"),
               u.models.length ? h("div", {}, `model ${u.models.join(", ")}`) : null,
               u.tools.length ? h("div", {}, `tools ${u.tools.join(", ")}`) : null,
@@ -453,8 +453,8 @@ function agents(name) {
       ...o.agents.map((a) =>
         h(
           "a",
-          { class: "panel stack", href: `#/agents/${encodeURIComponent(a.name)}`, style: { textDecoration: "none", borderTop: `3px solid ${hue(a.name)}` } },
-          h("div", { class: "row" }, h("h3", { class: "grow" }, a.name), chip(a.autonomy)),
+          { class: "stack", href: `#/agents/${encodeURIComponent(a.name)}` },
+          h("div", { class: "row" }, h("h3", { class: "grow" }, h("span", { class: "dot", style: { background: hue(a.name) } }), a.name), chip(a.autonomy)),
           h("div", { class: "mute" }, `${a.model || "model not declared"}. ${a.tasks ?? 0} tasks lately, ${a.errors ?? 0} failed.`),
           ...a.slis.map((x) => h("div", {}, h("div", { class: "row" }, h("span", { class: "grow" }, SLI_NAMES[x.sli] || x.sli), h("span", { class: "num" }, pct(x.value))), budgetBar(x.budget_left))),
         ),
@@ -645,7 +645,7 @@ function incidents() {
     open.replaceChildren(
       h("h2", {}, "Incidents"),
       i.incidents.length
-        ? h("table", {}, h("tbody", {}, i.incidents.map((x) => h("tr", {}, h("td", {}, clock(x.opened_at)), h("td", {}, chip(x.status), " ", chip(x.severity)), h("td", {}, x.title, h("div", { class: "mute" }, `webhook: ${x.notify_state}`))))))
+        ? h("table", {}, h("tbody", {}, i.incidents.map((x) => h("tr", {}, h("td", {}, clock(x.opened_at)), h("td", {}, chip(x.status), h("div", { class: "mute" }, x.severity)), h("td", {}, x.title, h("div", { class: "mute" }, `webhook: ${x.notify_state}`))))))
         : h("p", { class: "empty" }, "No incidents. One opens when an agent is demoted or a dependency is quarantined."),
     );
     causes.replaceChildren(

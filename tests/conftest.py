@@ -10,7 +10,7 @@ import os
 import socket
 import threading
 import time
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import httpx
 import pytest
@@ -69,15 +69,39 @@ def wait_for(check, seconds: float, what: str = "condition"):
     raise AssertionError(f"timed out after {seconds}s waiting for {what}")
 
 
+class DatabaseOutage:
+    """Makes every statement on one engine fail the way a lost database does, while it is switched on.
+
+    It hooks the driver call itself, so everything above it (pool, retries, error handling, HTTP answers)
+    runs exactly as it would in a real outage.
+    """
+
+    def __init__(self, engine: sa.Engine):
+        self.engine, self.on = engine, False
+        sa.event.listen(engine, "before_cursor_execute", self._fail)
+
+    def _fail(self, conn, cursor, statement, params, context, executemany):
+        if self.on:
+            raise sa.exc.OperationalError(statement[:60], None, ConnectionError("simulated: the database is unreachable"))
+
+    def __enter__(self):
+        self.on = True
+        return self
+
+    def __exit__(self, *_):
+        self.on = False
+
+
 class Receiver:
     """A stand-in for Aegis War Room or Argus: records what Themis posts."""
 
-    def __init__(self, status=200):
+    def __init__(self, status=200, delay=0.0):
         self.got, outer = [], self
 
         class Handler(BaseHTTPRequestHandler):
             def do_POST(self):
                 body = self.rfile.read(int(self.headers["Content-Length"]))
+                time.sleep(delay)  # a receiver that is slow to answer
                 outer.got.append((dict(self.headers), body))
                 self.send_response(status)
                 self.end_headers()
@@ -85,7 +109,7 @@ class Receiver:
             def log_message(self, *args):
                 pass
 
-        self.server = HTTPServer(("127.0.0.1", 0), Handler)
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.url = f"http://127.0.0.1:{self.server.server_port}/api/alerts"
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
 
