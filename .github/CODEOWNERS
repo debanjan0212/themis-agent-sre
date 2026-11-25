@@ -1,0 +1,10 @@
+# Who must approve changes. The lines lower down win.
+*                       @debanjan0212
+
+# The rules that take autonomy away, who may call what, and the pipelines that check everything.
+/themis/autonomy.py     @debanjan0212
+/themis/slo.py          @debanjan0212
+/themis/security.py     @debanjan0212
+/themis/world/fleet.yaml @debanjan0212
+/deploy/                @debanjan0212
+/.github/               @debanjan0212

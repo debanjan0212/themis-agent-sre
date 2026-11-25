@@ -1,0 +1,19 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: themis
+  namespace: platform
+  labels:
+    app.kubernetes.io/name: themis
+    app.kubernetes.io/part-of: platform
+    app.kubernetes.io/managed-by: intentops
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: themis
+  podTargetLabels:
+  - rollouts-pod-template-hash
+  endpoints:
+  - port: http
+    path: /metrics
+    interval: 30s

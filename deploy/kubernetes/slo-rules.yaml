@@ -1,0 +1,66 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: themis
+  namespace: platform
+  labels:
+    app.kubernetes.io/name: themis
+    app.kubernetes.io/part-of: platform
+    app.kubernetes.io/managed-by: intentops
+spec:
+  groups:
+  - name: themis-slo
+    rules:
+    - record: slo:sli_error:ratio_rate5m
+      labels:
+        namespace: platform
+        service: themis
+      expr: sum(rate(http_server_request_duration_seconds_count{namespace="platform",service="themis",http_response_status_code=~"5.."}[5m])) / sum(rate(http_server_request_duration_seconds_count{namespace="platform",service="themis"}[5m]))
+    - record: slo:sli_error:ratio_rate30m
+      labels:
+        namespace: platform
+        service: themis
+      expr: sum(rate(http_server_request_duration_seconds_count{namespace="platform",service="themis",http_response_status_code=~"5.."}[30m])) / sum(rate(http_server_request_duration_seconds_count{namespace="platform",service="themis"}[30m]))
+    - record: slo:sli_error:ratio_rate1h
+      labels:
+        namespace: platform
+        service: themis
+      expr: sum(rate(http_server_request_duration_seconds_count{namespace="platform",service="themis",http_response_status_code=~"5.."}[1h])) / sum(rate(http_server_request_duration_seconds_count{namespace="platform",service="themis"}[1h]))
+    - record: slo:sli_error:ratio_rate6h
+      labels:
+        namespace: platform
+        service: themis
+      expr: sum(rate(http_server_request_duration_seconds_count{namespace="platform",service="themis",http_response_status_code=~"5.."}[6h])) / sum(rate(http_server_request_duration_seconds_count{namespace="platform",service="themis"}[6h]))
+    - record: slo:sli_error:ratio_rate3d
+      labels:
+        namespace: platform
+        service: themis
+      expr: sum(rate(http_server_request_duration_seconds_count{namespace="platform",service="themis",http_response_status_code=~"5.."}[3d])) / sum(rate(http_server_request_duration_seconds_count{namespace="platform",service="themis"}[3d]))
+    - alert: ThemisErrorBudgetBurn
+      labels:
+        severity: page
+        window: 1h
+      expr: slo:sli_error:ratio_rate1h{namespace="platform",service="themis"} > 0.0144 and slo:sli_error:ratio_rate5m{namespace="platform",service="themis"} > 0.0144
+      annotations:
+        summary: themis is burning its 99.9% error budget 14.4x too fast (1h/5m windows)
+    - alert: ThemisErrorBudgetBurn
+      labels:
+        severity: page
+        window: 6h
+      expr: slo:sli_error:ratio_rate6h{namespace="platform",service="themis"} > 0.006 and slo:sli_error:ratio_rate30m{namespace="platform",service="themis"} > 0.006
+      annotations:
+        summary: themis is burning its 99.9% error budget 6x too fast (6h/30m windows)
+    - alert: ThemisErrorBudgetBurn
+      labels:
+        severity: ticket
+        window: 3d
+      expr: slo:sli_error:ratio_rate3d{namespace="platform",service="themis"} > 0.001 and slo:sli_error:ratio_rate6h{namespace="platform",service="themis"} > 0.001
+      annotations:
+        summary: themis is burning its 99.9% error budget 1x too fast (3d/6h windows)
+    - alert: ThemisLatencySLO
+      for: 10m
+      labels:
+        severity: ticket
+      expr: histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_seconds_bucket{namespace="platform",service="themis"}[5m]))) * 1000 > 300
+      annotations:
+        summary: themis p95 latency is above 300ms
