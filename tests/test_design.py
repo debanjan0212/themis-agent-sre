@@ -184,7 +184,8 @@ def test_the_product_page_moves_only_the_product():
     # scrolling changes one thing: which part of the pinned fleet map is lit. No section fades or slides in
     transitions = re.findall(r"([^{}]+)\{[^{}]*transition:", css)
     assert all(sel.strip().startswith(".pin") for sel in transitions), transitions
-    script = re.search(r"<script>(.*?)</script>", css, re.S).group(1)
+    # our own page, not input to filter: the one inline script sits between these two literal tags
+    script = css.split("<script>", 1)[1].split("</script>", 1)[0]
     assert "classList" not in script and ".style." not in script
     assert re.findall(r"(\w+)\.dataset\.\w+\s*=", script) == ["pin"]
 
