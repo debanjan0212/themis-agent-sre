@@ -426,3 +426,34 @@ def test_prune_drops_only_what_is_past_retention(engine, settings):
     ev.tick(engine, settings, T0)
     ev.prune(engine, settings, T0)
     assert len(rows(engine, db.journeys)) == 1 and {r["end"] > T0 - 3600 for r in rows(engine, db.spans)} == {True}
+
+
+def test_a_harness_run_that_handed_its_action_to_a_person_is_blocked_not_a_success():
+    """agent-harness-sdk marks such a run agent.run.status=escalated on an otherwise healthy root span."""
+
+    def s(sid, parent, kind, ok=True, **attrs):
+        return dict(
+            trace_id="t1",
+            span_id=sid,
+            parent_id=parent,
+            kind=kind,
+            name=sid,
+            agent="deployer",
+            target=None,
+            ok=ok,
+            start=1.0,
+            end=2.0,
+            error_type=None,
+            cost=None,
+            input_tokens=0,
+            output_tokens=0,
+            attrs=attrs,
+        )
+
+    root = s("root", None, "agent", **{"agent.run.status": "escalated"})
+    why = "Themis has suspended deployer, so a person must take this action"
+    denied = s("t", "root", "tool", ok=False, **{"themis.gate.decision": "deny", "themis.gate.reason": why})
+    denied["target"] = "rollback"
+    judged = ev._judge("tenant", root, [root, denied])
+    assert judged["outcome"] == "blocked" and judged["culprit"] == "agent:deployer" and why in judged["culprit_reason"]
+    assert ev._judge("tenant", dict(root, attrs={"agent.run.status": "completed"}), [root])["outcome"] == "success"

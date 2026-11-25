@@ -10,9 +10,9 @@ set -euo pipefail
 
 dir="${1:-.siblings}"
 declare -A pins=(
-  [agent-harness-sdk]=da182bebb0c5e1956e3751c0a233944ef1e68d51
-  [aegis-war-room]=d884af6d29b2c0eedde3546133a22d10f97396a7
-  [argus-sre-agent]=d9a24eb232c998e261b35213a86e350438ea8697
+  [agent-harness-sdk]=3359e5fa2b656485cb6e1ef93711ce27eaf6eb0c
+  [aegis-war-room]=6309797028ed43748ee4a406851df89a46720060
+  [argus-sre-agent]=b257343cc9e0db177394505e8ef1aab589e93b40
   [intentops]=d30da595b1708ab363a666569c9721c6bbd7f91a
 )
 

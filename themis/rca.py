@@ -37,6 +37,8 @@ def blame(span: dict) -> tuple[str, str] | None:
     decision = attrs.get("themis.gate.decision")
     if decision in ("deny", "denied_by_human") and agent:
         what = "tried an action outside its policy" if decision == "deny" else "proposed an action a human rejected"
+        if why := attrs.get("themis.gate.reason"):  # the runtime said exactly why it stopped the action
+            return agent, f"{span['agent']} was stopped before {span.get('target') or span.get('name')}: {why}"
         return agent, f"{span['agent']} {what}: {span.get('target') or span.get('name')}"
     if span["kind"] == "handoff" and attrs.get("themis.handoff.valid") is False and agent:
         return agent, f"{span['agent']} handed invalid work to {span.get('target')}"

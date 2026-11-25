@@ -202,6 +202,8 @@ def _resolve(ss: list[dict], prices: dict) -> list[dict]:
 def _judge(tid: str, root: dict, ss: list[dict]) -> dict:
     attrs = root.get("attrs") or {}
     outcome = attrs.get("themis.journey.outcome")
+    if outcome not in ("success", "failed", "blocked") and attrs.get("agent.run.status") == "escalated":
+        outcome = "blocked"  # agent-harness-sdk: the run stopped and handed its action to a person
     if outcome not in ("success", "failed", "blocked"):
         outcome = "success" if root["ok"] else "failed"
     culprit = source = reason = confidence = None
