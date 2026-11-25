@@ -1,6 +1,6 @@
-"""Record the demo video from a live run. Nothing in it is staged: the footage is the real dashboard, in real
-Chrome, while the real control loop handles three injected faults. The numbers on the results card are read
-from docs/results.json, which `themis bench` writes.
+"""Record the demo video from a live run. Nothing in it is staged: the footage is the dashboard in Chrome while
+the control loop handles three injected faults. The numbers on the result cards are read from docs/results.json
+(written by `themis bench`) and docs/reliability.json (written by scripts/soak.py).
 
     pip install -e ".[ui-test]"          # needs Chrome and ffmpeg on the machine too
     python scripts/film.py out/          # writes out/themis-demo.mp4 (about 90 seconds, 1920x1080, no sound)
@@ -10,6 +10,7 @@ from docs/results.json, which `themis bench` writes.
 from __future__ import annotations
 
 import asyncio
+import base64
 import html
 import json
 import os
@@ -29,21 +30,25 @@ WEB = REPO / "themis" / "web"
 SIZE = dict(viewport={"width": 1280, "height": 720}, device_scale_factor=1.5)  # films at 1920x1080
 ENCODE = ["-c:v", "libx264", "-crf", "20", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-r", "30"]
 
+FONTS = (WEB / "fonts").as_uri()
 CARD_CSS = f"""
-@font-face {{ font-family: R; font-weight: 600; src: url("{WEB.as_uri()}/fonts/rajdhani-latin-600-normal.woff2"); }}
-@font-face {{ font-family: R; font-weight: 700; src: url("{WEB.as_uri()}/fonts/rajdhani-latin-700-normal.woff2"); }}
-@font-face {{ font-family: H; font-weight: 400; src: url("{WEB.as_uri()}/fonts/hind-latin-400-normal.woff2"); }}
-html {{ background: #14122b; color: #ece9f7; font: 400 30px/1.4 H, sans-serif; }}
+@font-face {{ font-family: "Sora"; font-weight: 200; src: url("{FONTS}/sora-latin-200-normal.woff2"); }}
+@font-face {{ font-family: "Sora"; font-weight: 300; src: url("{FONTS}/sora-latin-300-normal.woff2"); }}
+@font-face {{ font-family: "Sora"; font-weight: 600; src: url("{FONTS}/sora-latin-600-normal.woff2"); }}
+@font-face {{ font-family: "JetBrains Mono"; font-weight: 400; src: url("{FONTS}/jetbrains-mono-latin-400-normal.woff2"); }}
+html {{ color: #e6f0f4; font: 300 30px/1.45 "Sora", sans-serif;
+  background: radial-gradient(1100px 650px at 12% -8%, rgba(24, 96, 118, 0.3), transparent 62%),
+              radial-gradient(900px 620px at 108% 4%, rgba(112, 70, 210, 0.16), transparent 60%), #03060a; }}
 body {{ margin: 0; height: 100vh; display: flex; flex-direction: column; justify-content: center; padding: 0 96px; box-sizing: border-box; }}
-h1 {{ font: 700 132px/1 R; letter-spacing: 0.06em; color: #e0b25a; margin: 0 0 22px; }}
-h2 {{ font: 600 58px/1.1 R; margin: 0 0 28px; color: #e0b25a; }}
-p {{ margin: 0 0 12px; max-width: 34em; }}
-.mute {{ color: #a39fc4; }}
+h1 {{ font-weight: 600; font-size: 168px; line-height: 1; letter-spacing: 0.18em; margin: 0 0 26px; }}
+h2 {{ font-weight: 300; font-size: 56px; line-height: 1.1; letter-spacing: -0.01em; margin: 0 0 30px; }}
+p {{ margin: 0 0 12px; max-width: 36em; }}
+.mute {{ color: #7c919c; }}
 table {{ border-collapse: collapse; font-size: 27px; width: 100%; }}
-td, th {{ padding: 10px 28px 10px 0; border-bottom: 1px solid #2c2957; text-align: left; vertical-align: top; }}
-th {{ font: 600 24px R; color: #a39fc4; }}
-.n {{ font: 600 36px/1 R; color: #5fe3b3; white-space: nowrap; }}
-code {{ font: 600 36px R; color: #5fe3b3; }}
+td, th {{ padding: 10px 28px 10px 0; border-bottom: 1px solid rgba(130, 205, 230, 0.14); text-align: left; vertical-align: top; }}
+th {{ font: 400 17px "JetBrains Mono", monospace; letter-spacing: 0.12em; text-transform: uppercase; color: #7c919c; }}
+.n {{ font-weight: 200; font-size: 36px; line-height: 1; white-space: nowrap; font-variant-numeric: tabular-nums; color: #58d5ff; text-shadow: 0 0 18px rgba(88, 213, 255, 0.45); }}
+code {{ font: 400 30px "JetBrains Mono", monospace; color: #ffb54a; }}
 """
 
 
@@ -61,20 +66,46 @@ def results_card() -> str:
         before, after = c["before_response"]["failed_rate"], c["after_response"]["failed_rate"]
         rows.append(
             f"<tr><td>{html.escape(x['fault'].replace('_', ' '))}</td><td>{html.escape(det['response'] or 'none')}</td>"
-            f"<td class=n>{det['seconds']}s</td><td class=n>{before:.0%} → {after:.0%}</td><td class=n>{named}</td></tr>"
+            f"<td class=n>{det['seconds']} s</td><td class=n>{before:.0%} to {after:.0%}</td><td class=n>{named}</td></tr>"
         )
     total = sum(x["result"]["rca"]["all_labelled"] for x in d["experiments"])
     right = sum(x["result"]["rca"]["all_correct"] for x in d["experiments"])
     journeys = sum(d["world"].get(k, 0) for k in ("success", "failed", "blocked"))
     fit = "<style>h2{font-size:50px;margin-bottom:16px} table{font-size:25px} td,th{padding:7px 24px 7px 0} .n{font-size:31px} p{font-size:26px}</style>"
     return card(
-        fit + "<h2>Measured, not claimed</h2>"
+        fit + "<h2>What themis bench measured</h2>"
         "<table><tr><th>Fault</th><th>What Themis did</th><th>After</th><th>Journeys failing</th><th>Cause named right</th></tr>"
         + "".join(rows)
         + "</table>"
         f"<p style='margin-top:26px'>{journeys:,} journeys on {html.escape(d['database'].split('+')[0])}. "
         f"Root cause right for {right} of {total} failed journeys. Ingest {d['ingest']['spans_per_second']:,} spans a second.</p>"
-        "<p class=mute>Simulated models and tools, real control plane. Every number is written by <b>themis bench</b>.</p>"
+        "<p class=mute>The models and tools are simulated; the control plane is the code in the repository.</p>"
+    )
+
+
+def reliability_card() -> str:
+    d = json.loads((REPO / "docs" / "reliability.json").read_text())
+    ev = {e["what"]: e for e in d["events"]}
+    by = d["by_exporter_timeout"]
+    steady = [r["steady"]["p95_ms"] for r in d["routes"].values()]
+    rows = [
+        ("Spans lost, default 10 s exporter timeout", f"{by['10s']['dropped']:,} of {by['10s']['sent']:,}"),
+        ("Spans lost, 30 s exporter timeout", f"{by['30s']['dropped']:,} of {by['30s']['sent']:,}"),
+        (
+            "Journeys counted twice",
+            "0" if d["double_count_check"]["task_events"] == d["double_count_check"]["expected_task_events"] else "some",
+        ),
+        ("Leader handed over in a rolling deploy", f"{ev['new leader after clean stop']['seconds']} s"),
+        ("Leader replaced after a crash", f"{ev['new leader after crash']['seconds']} s"),
+        ("p95 outside the faults, by route", f"{min(steady):.0f} to {max(steady):.0f} ms"),
+    ]
+    return card(
+        "<h2>Does Themis keep its own SLO?</h2>"
+        f"<p class=mute style='margin-bottom:22px'>{d['settings']['replicas']} replicas, {d['load']['journeys_per_second']:g} journeys a second. "
+        "The leader is killed, another is restarted as in a rolling deploy, and Postgres is stopped for "
+        f"{ev['Postgres stopped']['seconds']:g} s.</p>"
+        "<table>" + "".join(f"<tr><td>{html.escape(k)}</td><td class=n>{v}</td></tr>" for k, v in rows) + "</table>"
+        "<p class=mute style='margin-top:22px'>Every number is written by <b>scripts/soak.py</b>.</p>"
     )
 
 
@@ -83,18 +114,18 @@ CARDS = {
         "<h1>THEMIS</h1><p>SRE for agent fleets.</p><p class=mute>Agents that spend their error budget lose their autonomy.</p>"
     ),
     "setup": card(
-        "<h2>Ten agents. Three faults. One live run.</h2>"
-        "<p>What follows is the real dashboard, recording while it happens.</p>"
+        "<h2>Three faults in a fleet of ten agents</h2>"
+        "<p>What follows is the dashboard, recorded while it happened.</p>"
         "<p class=mute>The human sits at the centre. The less an agent is trusted, the closer it is pulled in.</p>"
     ),
     "family": card(
         "<h2>It works with what is already there</h2>"
         "<table>"
-        "<tr><td>agent-harness-sdk</td><td>its agents show up with two environment variables</td></tr>"
-        "<tr><td>Aegis War Room</td><td>opens a war-room incident when an agent is suspended</td></tr>"
-        "<tr><td>Argus</td><td>starts a root-cause investigation</td></tr>"
+        "<tr><td>agent-harness-sdk</td><td>its agents show up with two environment variables, and obey Themis with two arguments</td></tr>"
+        "<tr><td>Aegis War Room</td><td>opens a war-room incident when an agent is suspended, and reports its own nine agents</td></tr>"
+        "<tr><td>Argus</td><td>starts a root-cause investigation, and reports its own</td></tr>"
         "<tr><td>IntentOps</td><td>plans and renders the Kubernetes deployment</td></tr>"
-        "</table><p class=mute style='margin-top:22px'>Each of these runs for real in the test suite.</p>"
+        "</table><p class=mute style='margin-top:22px'>Each connection runs end to end in the test suite.</p>"
     ),
     "end": card(
         "<h1>THEMIS</h1><p>Try it: <code>pip install -e . &amp;&amp; themis demo --chaos</code></p><p class=mute>No cloud, no key, no Docker.</p>"
@@ -115,7 +146,7 @@ def encode_frames(frames: list[tuple[Path, float]], out: Path) -> None:
     lines.append(f"file '{frames[-1][0]}'")  # the concat demuxer needs the last frame named twice
     listing.write_text("\n".join(lines))
     length = frames[-1][1] - frames[0][1]
-    fades = f"fps=30,format=yuv420p,fade=in:st=0:d=0.3,fade=out:st={max(length - 0.3, 0):.2f}:d=0.3"
+    fades = f"scale=1920:1080,fps=30,format=yuv420p,fade=in:st=0:d=0.3,fade=out:st={max(length - 0.3, 0):.2f}:d=0.3"
     tmp = out.with_name(out.stem + ".part.mp4")
     run("ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(listing), "-vf", fades, *ENCODE, str(tmp))
     tmp.rename(out)  # only a finished render gets the real name
@@ -129,15 +160,15 @@ def encode_still(png: Path, seconds: float, out: Path) -> None:
 
 
 # While filming, the caption takes the place of the dashboard's own chaos banner, so nothing is covered.
-FILM_CSS = ".banner, .orrery .legend { display: none } .orrery svg { max-height: calc(100vh - 205px) }"
+FILM_CSS = ".banner, .orrery .legend { display: none } .orrery svg.map { max-height: calc(100vh - 205px) }"
 CAPTION_JS = """(text) => {
   let el = document.getElementById("film-caption");
   if (!el) {
     el = document.createElement("div");
     el.id = "film-caption";
     Object.assign(el.style, {
-      margin: "14px 20px 0", padding: "9px 22px", borderRadius: "10px", border: "1.5px solid #e0b25a",
-      font: '600 25px/1.25 "Rajdhani", sans-serif', color: "#ece9f7", minHeight: "64px",
+      margin: "14px 20px 0", padding: "9px 22px", borderRadius: "14px", border: "1px solid rgba(130, 205, 230, 0.16)", background: "rgba(16, 27, 36, 0.6)",
+      font: '300 21px/1.3 "Sora", sans-serif', color: "#e6f0f4", minHeight: "64px",
       display: "flex", alignItems: "center",
     });
     document.querySelector("header.top").after(el);
@@ -161,7 +192,9 @@ async def film(out: Path, preview: bool) -> None:
 
         async def still(name: str, seconds: float) -> None:
             source = work / f"{name}.html"  # a file, so the page may load the fonts from the repository
-            source.write_text(CARDS[name] if name in CARDS else results_card())
+            source.write_text(
+                CARDS[name] if name in CARDS else {"results": results_card, "reliability": reliability_card}[name]()
+            )
             await page.goto(source.as_uri())
             await page.wait_for_timeout(500)
             png = work / f"{name}.png"
@@ -182,14 +215,26 @@ async def film(out: Path, preview: bool) -> None:
                     await action()
                 await page.wait_for_timeout(int(seconds * 1000 * 0.8))
                 await page.screenshot(path=str(out / f"preview-{len(scenes):02d}-{name}.jpg"), type="jpeg", quality=92)
-            while not preview and time.time() - start < seconds:
-                while todo and time.time() - start >= todo[0][0]:
-                    await todo.pop(0)[1]()
-                path = work / f"f{shots:06d}.jpg"
-                at = time.time()
-                await page.screenshot(path=str(path), type="jpeg", quality=92)
-                frames.append((path, at))
-                shots += 1
+            if not preview:
+                # Chrome's own screencast: a frame each time the page is drawn, far faster than screenshots
+                cdp = await page.context.new_cdp_session(page)
+
+                def keep(e: dict) -> None:
+                    nonlocal shots
+                    path = work / f"f{shots:06d}.jpg"
+                    path.write_bytes(base64.b64decode(e["data"]))
+                    frames.append((path, time.time()))
+                    shots += 1
+                    asyncio.ensure_future(cdp.send("Page.screencastFrameAck", {"sessionId": e["sessionId"]}))
+
+                cdp.on("Page.screencastFrame", keep)
+                await cdp.send("Page.startScreencast", {"format": "jpeg", "quality": 92, "maxWidth": 1920, "maxHeight": 1080})
+                while time.time() - start < seconds:
+                    while todo and time.time() - start >= todo[0][0]:
+                        await todo.pop(0)[1]()
+                    await asyncio.sleep(0.05)
+                await cdp.send("Page.stopScreencast")
+                await cdp.detach()
             if frames:
                 encode_frames(frames, work / f"scene-{len(scenes):02d}.mp4")
             scenes.append(work / f"scene-{len(scenes):02d}.mp4")
@@ -220,6 +265,7 @@ async def film(out: Path, preview: bool) -> None:
         async def reinstate():
             await page.get_by_label("Reason").fill("prompt source cleaned, fault removed")
             await page.get_by_role("button", name="Supervise").click()
+            await page.evaluate("window.scrollTo(0, 0)")  # keep the page's own header in the frame
 
         await still("title", 4)
         await still("setup", 6)
@@ -254,6 +300,7 @@ async def film(out: Path, preview: bool) -> None:
             [(0, go("agents/coder")), (4.0, reinstate)],
         )  # fmt: skip
         await still("results", 11)
+        await still("reliability", 9)
         await still("family", 7)
         await still("end", 5)
         await browser.close()

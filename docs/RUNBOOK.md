@@ -39,18 +39,26 @@ that use it: the statistics find what failing journeys have in common, which is 
 ## The dashboard is stale, or nothing is being judged
 
 `GET /readyz` on each replica shows `"leader": true` on exactly one. `GET /metrics` shows
-`themis_evaluator_last_tick_age_seconds`.
+`themis_evaluator_last_tick_age_seconds` and `themis_evaluator_lag_seconds` (how long the oldest finished journey
+waited to be judged). `deploy/alerts.yaml` alerts on both.
 
 - No leader: the database is unreachable or every evaluator is crashing. Check the pod logs for "evaluator tick
-  failed"; the error and its trace are logged every time.
+  failed"; the error and its trace are logged every time. After a crash, expect up to three evaluator intervals
+  with no leader while the old lease runs out.
 - Tick age growing on the leader: the evaluator is behind. Look at database load first.
+- `themis_traces_skipped_total` going up: a trace could not be judged and was set aside so the rest could be.
+  The log has the trace id and the error.
+- `themis_webhook_deliveries_total{result="failed"}` going up: a receiver keeps refusing incidents. Delivery is
+  retried; the incident page shows which ones are still pending.
 - Agents keep working through this: they hold their last gate snapshot.
 
 ## The database is down
 
-`/readyz` answers 503, so Kubernetes takes the pods out of the Service. Ingest fails and exporters retry and
-then drop spans: a gap in the data, not an outage for your agents. When the database is back, a replica takes
-the lease and judging resumes.
+`/readyz` answers 503, so Kubernetes takes the pods out of the Service. Ingest answers 503 with `Retry-After`;
+exporters retry for as long as their timeout allows and then drop spans: a gap in the data, not an outage for
+your agents. Set `OTEL_EXPORTER_OTLP_TIMEOUT=30` on your agents, or put the Collector in
+`deploy/otel-collector.yaml` in front, to ride out longer outages. When the database is back, a replica takes the
+lease and judging resumes.
 
 Back up Postgres like any other database. Losing it loses history and autonomy state; agents start as
 autonomous again, so apply the fleet manifest and re-suspend anything that was suspended.

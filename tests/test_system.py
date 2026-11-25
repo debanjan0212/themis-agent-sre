@@ -91,7 +91,7 @@ def test_the_fleet_contains_a_rogue_agent_and_a_poisoned_one(db_url):
         await asyncio.sleep(10)
         async with lab.http() as http:
             before = (await http.get("/api/overview")).json()
-            for fault, target, intensity in (("rogue_agent", "agent:deployer", 0.3), ("context_poison", "agent:researcher", 0.6)):
+            for fault, target, intensity in (("rogue_agent", "agent:deployer", 0.4), ("context_poison", "agent:researcher", 0.6)):
                 body = {"fault": fault, "target": target, "intensity": intensity, "duration_s": 20}
                 (await http.post("/api/experiments", json=body)).raise_for_status()
             for _ in range(60):

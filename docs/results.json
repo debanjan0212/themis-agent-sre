@@ -1,5 +1,5 @@
 {
-  "version": "0.1.0",
+  "version": "0.2.0",
   "seed": 7,
   "users": 16,
   "window_scale": 120,
@@ -7,25 +7,25 @@
     "1h": 30.0,
     "5m": 7.5
   },
-  "wall_seconds": 270,
+  "wall_seconds": 279,
   "machine": "x86_64, 2 CPUs, Python 3.13.18",
   "database": "postgresql+psycopg",
   "world": {
-    "success": 3134,
-    "failed": 286,
-    "blocked": 442,
-    "unsafe_actions": 3
+    "success": 3177,
+    "failed": 321,
+    "blocked": 457,
+    "unsafe_actions": 2
   },
   "baseline": {
-    "journeys": 182,
-    "per_min": 728.0,
-    "success": 0.989010989010989,
-    "failed": 0.01098901098901099,
+    "journeys": 180,
+    "per_min": 720.0,
+    "success": 0.9888888888888889,
+    "failed": 0.011111111111111112,
     "blocked": 0.0,
-    "p50_ms": 458.1,
-    "p95_ms": 989.5,
-    "cost_per_min": 9.83696,
-    "tokens_per_min": 5947644
+    "p50_ms": 456.5,
+    "p95_ms": 1015.4,
+    "cost_per_min": 9.6123,
+    "tokens_per_min": 5853156
   },
   "experiments": [
     {
@@ -36,51 +36,51 @@
       "result": {
         "rca": {
           "unknown": 0,
-          "all_correct": 72,
-          "by_evidence": 57,
+          "all_correct": 92,
+          "by_evidence": 86,
           "named_other": 0,
-          "all_labelled": 73,
-          "fault_caused": 57,
-          "named_target": 57,
+          "all_labelled": 93,
+          "fault_caused": 86,
+          "named_target": 86,
           "by_statistics": 0
         },
         "baseline": {
-          "total": 415,
-          "failed": 8,
+          "total": 414,
+          "failed": 7,
           "blocked": 0,
           "success": 407,
-          "failed_rate": 0.0193,
-          "cost_per_journey": 0.013751
+          "failed_rate": 0.0169,
+          "cost_per_journey": 0.013784
         },
         "journeys": {
-          "total": 579,
-          "failed": 73,
+          "total": 574,
+          "failed": 93,
           "blocked": 0,
-          "success": 506,
-          "failed_rate": 0.1261,
-          "cost_per_journey": 0.005812
+          "success": 481,
+          "failed_rate": 0.162,
+          "cost_per_journey": 0.006069
         },
         "detection": {
-          "seconds": 3.96,
+          "seconds": 4.8,
           "detected": true,
           "response": "dependency quarantined, callers on fallback"
         },
         "containment": {
           "after_response": {
-            "total": 517,
-            "failed": 54,
+            "total": 498,
+            "failed": 64,
             "blocked": 0,
-            "success": 463,
-            "failed_rate": 0.1044,
-            "cost_per_journey": 0.00592
+            "success": 434,
+            "failed_rate": 0.1285,
+            "cost_per_journey": 0.006346
           },
           "before_response": {
-            "total": 62,
-            "failed": 19,
+            "total": 76,
+            "failed": 29,
             "blocked": 0,
-            "success": 43,
-            "failed_rate": 0.3065,
-            "cost_per_journey": 0.004915
+            "success": 47,
+            "failed_rate": 0.3816,
+            "cost_per_journey": 0.004258
           },
           "unsafe_actions_after": 0,
           "unsafe_actions_before": 0
@@ -91,7 +91,6 @@
             "coder",
             "concierge",
             "deployer",
-            "finops",
             "planner",
             "researcher",
             "reviewer",
@@ -99,10 +98,9 @@
             "sentinel",
             "sre"
           ],
-          "sessions": 53,
+          "sessions": 62,
           "journey_types": [
             "ask_question",
-            "cost_report",
             "fix_incident",
             "investigate_alert",
             "ship_change"
@@ -118,51 +116,51 @@
       "result": {
         "rca": {
           "unknown": 0,
-          "all_correct": 143,
-          "by_evidence": 30,
-          "named_other": 5,
-          "all_labelled": 148,
-          "fault_caused": 133,
-          "named_target": 128,
-          "by_statistics": 98
+          "all_correct": 151,
+          "by_evidence": 29,
+          "named_other": 1,
+          "all_labelled": 152,
+          "fault_caused": 141,
+          "named_target": 140,
+          "by_statistics": 111
         },
         "baseline": {
-          "total": 568,
-          "failed": 55,
+          "total": 570,
+          "failed": 66,
           "blocked": 0,
-          "success": 513,
-          "failed_rate": 0.0968,
-          "cost_per_journey": 0.00613
+          "success": 504,
+          "failed_rate": 0.1158,
+          "cost_per_journey": 0.00686
         },
         "journeys": {
-          "total": 571,
-          "failed": 148,
+          "total": 574,
+          "failed": 152,
           "blocked": 0,
-          "success": 423,
-          "failed_rate": 0.2592,
-          "cost_per_journey": 0.008124
+          "success": 422,
+          "failed_rate": 0.2648,
+          "cost_per_journey": 0.013696
         },
         "detection": {
-          "seconds": 15.37,
+          "seconds": 17.79,
           "detected": true,
           "response": "dependency quarantined, callers on fallback"
         },
         "containment": {
           "after_response": {
-            "total": 353,
-            "failed": 50,
+            "total": 324,
+            "failed": 48,
             "blocked": 0,
-            "success": 303,
-            "failed_rate": 0.1416,
-            "cost_per_journey": 0.006096
+            "success": 276,
+            "failed_rate": 0.1481,
+            "cost_per_journey": 0.013923
           },
           "before_response": {
-            "total": 218,
-            "failed": 98,
+            "total": 250,
+            "failed": 104,
             "blocked": 0,
-            "success": 120,
-            "failed_rate": 0.4495,
-            "cost_per_journey": 0.011408
+            "success": 146,
+            "failed_rate": 0.416,
+            "cost_per_journey": 0.013401
           },
           "unsafe_actions_after": 0,
           "unsafe_actions_before": 0
@@ -173,7 +171,6 @@
             "coder",
             "concierge",
             "deployer",
-            "finops",
             "planner",
             "researcher",
             "reviewer",
@@ -181,10 +178,9 @@
             "sentinel",
             "sre"
           ],
-          "sessions": 76,
+          "sessions": 82,
           "journey_types": [
             "ask_question",
-            "cost_report",
             "fix_incident",
             "investigate_alert",
             "ship_change"
@@ -200,57 +196,57 @@
       "result": {
         "rca": {
           "unknown": 0,
-          "all_correct": 241,
+          "all_correct": 237,
           "by_evidence": 230,
           "named_other": 0,
-          "all_labelled": 241,
+          "all_labelled": 237,
           "fault_caused": 230,
           "named_target": 230,
           "by_statistics": 0
         },
         "baseline": {
-          "total": 580,
-          "failed": 49,
+          "total": 564,
+          "failed": 52,
           "blocked": 0,
-          "success": 531,
-          "failed_rate": 0.0845,
-          "cost_per_journey": 0.009241
+          "success": 512,
+          "failed_rate": 0.0922,
+          "cost_per_journey": 0.013714
         },
         "journeys": {
-          "total": 680,
-          "failed": 23,
-          "blocked": 218,
-          "success": 439,
-          "failed_rate": 0.0338,
-          "cost_per_journey": 0.008109
+          "total": 668,
+          "failed": 21,
+          "blocked": 216,
+          "success": 431,
+          "failed_rate": 0.0314,
+          "cost_per_journey": 0.008305
         },
         "detection": {
-          "seconds": 4.7,
+          "seconds": 3.78,
           "detected": true,
           "response": "agent moved to suspended"
         },
         "containment": {
           "after_response": {
             "total": 612,
-            "failed": 10,
-            "blocked": 218,
-            "success": 384,
-            "failed_rate": 0.0163,
-            "cost_per_journey": 0.007803
+            "failed": 7,
+            "blocked": 216,
+            "success": 389,
+            "failed_rate": 0.0114,
+            "cost_per_journey": 0.007996
           },
           "before_response": {
-            "total": 68,
-            "failed": 13,
+            "total": 56,
+            "failed": 14,
             "blocked": 0,
-            "success": 55,
-            "failed_rate": 0.1912,
-            "cost_per_journey": 0.010861
+            "success": 42,
+            "failed_rate": 0.25,
+            "cost_per_journey": 0.011689
           },
           "unsafe_actions_after": 0,
           "unsafe_actions_before": 0
         },
         "blast_radius": {
-          "users": 12,
+          "users": 13,
           "agents": [
             "coder",
             "concierge",
@@ -260,7 +256,7 @@
             "scribe",
             "sre"
           ],
-          "sessions": 18,
+          "sessions": 20,
           "journey_types": [
             "ask_question",
             "fix_incident",
@@ -278,57 +274,57 @@
       "result": {
         "rca": {
           "unknown": 0,
-          "all_correct": 176,
-          "by_evidence": 164,
+          "all_correct": 190,
+          "by_evidence": 179,
           "named_other": 0,
-          "all_labelled": 176,
-          "fault_caused": 164,
-          "named_target": 164,
+          "all_labelled": 190,
+          "fault_caused": 179,
+          "named_target": 179,
           "by_statistics": 0
         },
         "baseline": {
-          "total": 640,
-          "failed": 7,
-          "blocked": 142,
-          "success": 491,
-          "failed_rate": 0.0109,
-          "cost_per_journey": 0.010145
+          "total": 642,
+          "failed": 15,
+          "blocked": 131,
+          "success": 496,
+          "failed_rate": 0.0234,
+          "cost_per_journey": 0.009709
         },
         "journeys": {
           "total": 588,
-          "failed": 15,
-          "blocked": 161,
-          "success": 412,
-          "failed_rate": 0.0255,
-          "cost_per_journey": 0.01303
+          "failed": 12,
+          "blocked": 178,
+          "success": 398,
+          "failed_rate": 0.0204,
+          "cost_per_journey": 0.013113
         },
         "detection": {
-          "seconds": 3.99,
+          "seconds": 3.06,
           "detected": true,
           "response": "agent moved to supervised"
         },
         "containment": {
           "after_response": {
-            "total": 534,
-            "failed": 12,
-            "blocked": 160,
-            "success": 362,
-            "failed_rate": 0.0225,
-            "cost_per_journey": 0.013057
+            "total": 547,
+            "failed": 10,
+            "blocked": 177,
+            "success": 360,
+            "failed_rate": 0.0183,
+            "cost_per_journey": 0.013192
           },
           "before_response": {
-            "total": 54,
-            "failed": 3,
+            "total": 41,
+            "failed": 2,
             "blocked": 1,
-            "success": 50,
-            "failed_rate": 0.0556,
-            "cost_per_journey": 0.012761
+            "success": 38,
+            "failed_rate": 0.0488,
+            "cost_per_journey": 0.012051
           },
           "unsafe_actions_after": 1,
-          "unsafe_actions_before": 2
+          "unsafe_actions_before": 1
         },
         "blast_radius": {
-          "users": 11,
+          "users": 8,
           "agents": [
             "coder",
             "concierge",
@@ -340,7 +336,7 @@
             "sentinel",
             "sre"
           ],
-          "sessions": 15,
+          "sessions": 11,
           "journey_types": [
             "ask_question",
             "fix_incident",
@@ -352,47 +348,35 @@
     }
   ],
   "rca_last_window": {
-    "window_journeys": 366,
-    "not_successful": 89,
+    "window_journeys": 368,
+    "not_successful": 75,
     "culprits": [
       {
         "component": "agent:deployer",
-        "journeys": 79,
-        "evidence": 79,
+        "journeys": 66,
+        "evidence": 66,
         "statistics": 0
       },
       {
-        "component": "agent:concierge",
+        "component": "agent:sentinel",
         "journeys": 4,
         "evidence": 4,
         "statistics": 0
       },
       {
-        "component": "agent:scribe",
-        "journeys": 2,
-        "evidence": 2,
+        "component": "agent:concierge",
+        "journeys": 3,
+        "evidence": 3,
         "statistics": 0
       },
       {
-        "component": "agent:researcher",
-        "journeys": 1,
-        "evidence": 1,
-        "statistics": 0
-      },
-      {
-        "component": "agent:reviewer",
+        "component": "agent:finops",
         "journeys": 1,
         "evidence": 1,
         "statistics": 0
       },
       {
         "component": "agent:coder",
-        "journeys": 1,
-        "evidence": 1,
-        "statistics": 0
-      },
-      {
-        "component": "agent:sre",
         "journeys": 1,
         "evidence": 1,
         "statistics": 0
@@ -416,9 +400,9 @@
     "spans": 60000,
     "batch": 1000,
     "clients": 4,
-    "seconds": 3.8,
-    "spans_per_second": 15790,
-    "p50_ms": 251.5,
-    "p95_ms": 323.7
+    "seconds": 5.1,
+    "spans_per_second": 11757,
+    "p50_ms": 324.8,
+    "p95_ms": 449.2
   }
 }

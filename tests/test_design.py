@@ -3,6 +3,11 @@
 Each test is one sign that a machine can check. The signs that need an eye (everything in a card, three icon
 cards in a row, pills above the headline) were checked by looking at screenshots; they are listed at the end so
 nobody thinks they were forgotten.
+
+The dashboard departs from three of the signs on purpose: it glows, it moves, and its small labels are set in
+uppercase mono, because that is the instrument look its owner chose (glowing orbital rings on black, glass
+panels). Those three are tested the other way round for it: the motion stops for anyone who asks for less, and
+the light comes from the data. The product page keeps all twenty.
 """
 
 from __future__ import annotations
@@ -99,11 +104,10 @@ def test_readme_links_have_no_arrows():
     assert not [t for t in links if re.search(r"[→↗›»]", t)]
 
 
-# 3: small all-caps eyebrows
-@pytest.mark.parametrize("where", CSS)
-def test_no_uppercase_labels(where):
-    assert not re.search(r"text-transform:\s*uppercase", CSS[where])
-    assert not re.search(r"font-variant(-caps)?:\s*(all-)?small-caps", CSS[where])
+# 3: small all-caps eyebrows. The dashboard's panel labels are uppercase mono by choice; the page has none
+def test_no_uppercase_labels_on_the_product_page():
+    assert not re.search(r"text-transform:\s*uppercase", CSS["product page"])
+    assert not re.search(r"font-variant(-caps)?:\s*(all-)?small-caps", CSS["product page"])
 
 
 # 4: cream backgrounds
@@ -161,10 +165,14 @@ def test_no_numbered_sections(built_page):
         assert not re.search(r">\s*0[1-9]\s*[<./]", source)
 
 
-# 10 and 19: motion. The dashboard has none; the product page has one moment, on the product only
-def test_the_dashboard_does_not_animate():
-    assert "@keyframes" not in CSS["dashboard"]
-    assert not re.search(r"animation:\s*(?!\s|none)", CSS["dashboard"])
+# 10 and 19: motion. The dashboard's instrument turns; all of it stops for anyone who has asked for less
+def test_the_dashboards_motion_stops_for_reduced_motion():
+    css = CSS["dashboard"]
+    calm = re.search(r"@media \(prefers-reduced-motion: reduce\)\s*\{(.*)\}\s*$", css, re.S).group(1)
+    assert "animation: none !important" in calm and "transition: none !important" in calm
+    js = (WEB / "app.js").read_text()
+    assert 'matchMedia("(prefers-reduced-motion: reduce)")' in js and "if (!calm.matches) frame = requestAnimationFrame" in js
+    assert not re.search(r"\.(fade|reveal|in-view)\b", css), "nothing fades in as you scroll"
 
 
 def test_the_product_page_moves_only_the_product():
@@ -181,10 +189,9 @@ def test_the_product_page_moves_only_the_product():
     assert re.findall(r"(\w+)\.dataset\.\w+\s*=", script) == ["pin"]
 
 
-# 11: blurred glows. The one gradient allowed is the contact shadow under the product
-@pytest.mark.parametrize("where", CSS)
-def test_no_glow_blobs(where):
-    css = CSS[where]
+# 11: blurred glows. On the dashboard the light is the data's own; on the page the one gradient is the shadow
+def test_no_glow_blobs_on_the_product_page():
+    css = CSS["product page"]
     assert not re.search(r"(?<!backdrop-)filter:\s*blur", css)
     rules = re.findall(r"([^{}]+)\{([^{}]*radial-gradient[^{}]*)\}", css)
     assert [sel.strip() for sel, _ in rules] in ([], [".shadow"])
@@ -193,17 +200,23 @@ def test_no_glow_blobs(where):
             assert max(r, g, b) < 40, "the shadow is a shadow, not a coloured light"
 
 
-# 12: one type family
+# 12: type chosen on purpose and used everywhere: Sora for text and numbers, JetBrains Mono for small labels
+FACES = {"Sora", "JetBrains Mono"}
+
+
 @pytest.mark.parametrize("where", CSS)
-def test_one_type_family(where):
+def test_one_type_pair_everywhere(where):
     css = CSS[where]
     assert "Instrument Serif" not in css
     faces = set(re.findall(r'@font-face\s*\{[^}]*font-family:\s*"([^"]+)"', css))
-    assert faces <= {"IBM Plex Sans", "IBM Plex Mono"}
+    assert faces == FACES
     stacks = re.findall(r"--(?:sans|mono):\s*([^;]+);", css)
-    assert stacks and all("IBM Plex" in s for s in stacks)
+    assert stacks and all(any(f in s for f in FACES) for s in stacks)
     for value in re.findall(r"(?<!@font-face \{ )font-family:\s*([^;]+);", css):
-        assert "IBM Plex" in value or value.startswith("var(--"), value
+        assert any(f in value for f in FACES) or value.startswith("var(--"), value
+    fonts = {p.name for p in (WEB / "fonts").glob("*.woff2")} if where == "dashboard" else set()
+    for name in re.findall(r'url\("(?:assets/)?fonts/([^"]+)"\)', css):
+        assert not fonts or name in fonts, f"{name} is not in themis/web/fonts"
 
 
 # 13: coloured bars on the side of quotes and callouts
@@ -272,3 +285,22 @@ def test_hero_layers_the_product_over_the_name(built_page):
 
 # Checked by eye on screenshots, not here: 7 everything in a card, 14 three icon cards in a row,
 # 15 pills above the headline.
+
+
+def test_the_readme_quotes_the_committed_measurements():
+    """The README's numbers are typed by hand, so they are checked against what the bench and the soak wrote."""
+    import json
+
+    readme = (REPO / "README.md").read_text()
+    bench = json.loads((REPO / "docs" / "results.json").read_text())
+    for x in bench["experiments"]:
+        r = x["result"]
+        row = next(line for line in readme.splitlines() if line.startswith(f"| `{x['fault']}`"))
+        assert f"| {r['detection']['seconds']}s |" in row, row
+        assert f"{r['rca']['named_target']} of {r['rca']['fault_caused']}" in row, row
+    right = sum(x["result"]["rca"]["all_correct"] for x in bench["experiments"])
+    total = sum(x["result"]["rca"]["all_labelled"] for x in bench["experiments"])
+    assert f"**{right} of {total}**" in readme
+    assert f"{bench['ingest']['spans_per_second']:,} spans a second" in readme
+    soak = json.loads((REPO / "docs" / "reliability.json").read_text())
+    assert f"**{soak['exporter']['dropped']:,} of {soak['sent']['spans']:,} spans were lost**" in readme

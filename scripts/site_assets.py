@@ -3,7 +3,7 @@
     python scripts/site_assets.py        # needs Chrome and playwright (pip install -e ".[ui-test]")
 
 It runs the ten-agent world, injects three faults, and waits until they show. Then it saves the fleet map as
-SVG (the page's centrepiece) and takes close-ups of a failed journey, an agent's budgets and the cause table
+SVG (the page's centrepiece) and as the README's screenshot, and takes close-ups of a failed journey, an agent's budgets and the cause table
 at twice the screen resolution. Nothing is drawn by hand: every picture is the dashboard itself.
 """
 
@@ -22,6 +22,20 @@ from themis.lab import Lab
 from themis.world.sim import World
 
 REPO = Path(__file__).resolve().parent.parent
+# The dashboard draws its turning rings as separate layers behind the map. For a still picture they go back into
+# the map, each at the angle it rests at, so the page gets one SVG.
+STILL = """(() => {
+  const map = document.querySelector(".orrery svg.map").cloneNode(true);
+  const rings = document.createElementNS("http://www.w3.org/2000/svg", "g");
+  for (const layer of document.querySelectorAll(".orrery .dial svg")) {
+    const g = layer.querySelector("g").cloneNode(true);
+    g.setAttribute("class", `instrument ${layer.getAttribute("class")}`);
+    if (+layer.dataset.tilt) g.setAttribute("transform", `rotate(${layer.dataset.tilt})`);
+    rings.append(g);
+  }
+  map.insertBefore(rings, map.children[1]);
+  return map.outerHTML;
+})()"""
 ASSETS = REPO / "site" / "assets"
 FAULTS = (
     ("rogue_agent", "agent:deployer", 0.35),
@@ -51,7 +65,9 @@ async def capture(raw: Path) -> None:
                 if await page.locator(".body.suspended").count() and await page.locator(".body.supervised").count():
                     break
             await page.wait_for_timeout(1500)  # let the agents finish sliding to their new orbits
-            (ASSETS / "orrery.svg").write_text(await page.evaluate("document.querySelector('.orrery svg').outerHTML"))
+            (ASSETS / "orrery.svg").write_text(await page.evaluate(STILL))
+            # the same moment for the README, at screen size
+            await page.screenshot(path=str(REPO / "docs" / "images" / "fleet.png"), scale="css")
             # a failed journey that crossed several agents, wide enough to be cropped past the frame
             wide = await browser.new_page(viewport={"width": 1800, "height": 1100}, device_scale_factor=2)
             await wide.goto(f"{lab.url}/#key={lab.key}")

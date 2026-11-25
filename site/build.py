@@ -128,6 +128,8 @@ def orrery(flat: bool) -> str:
     svg = (SITE / "assets" / "orrery.svg").read_text()
     if flat:  # the dissection lights the rim, which the dashboard draws no line for
         svg = svg.replace("</svg>", '<circle class="rimline" r="285"></circle></svg>', 1)
+        for name in ("glow", "bloom", "orb"):  # the page holds the map twice; ids must stay unique
+            svg = svg.replace(f'id="{name}"', f'id="{name}-2"').replace(f"url(#{name})", f"url(#{name}-2)")
     return svg
 
 

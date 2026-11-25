@@ -19,7 +19,7 @@ Everything is an environment variable. The defaults are the production values.
 | `THEMIS_SETTLE_SECONDS` | `2` | How long to wait after a journey's root span ends before judging it, so late child spans are included |
 | `THEMIS_WINDOW_SCALE` | `1` | Time compression for demos. `themis demo` uses 120 with a 1-second evaluator, which turns the 1h / 5m windows into 30s / 7.5s. Leave at 1 in production |
 | `THEMIS_CORS_ORIGINS` | none | Only needed if the dashboard is served from another origin |
-| `THEMIS_INSTANCE` | hostname + random | This replica's name in the evaluator lease |
+| `THEMIS_INSTANCE` | hostname | This replica's name in the evaluator lease. A random part is always added, so two processes never share a name |
 
 ## Keys and scopes
 
