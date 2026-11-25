@@ -86,6 +86,11 @@ def test_dashboard_views_work_and_telemetry_is_never_run_as_code(browser, lab):
 
     page.goto(f"{lab.url}/#/agents")
     page.wait_for_selector(".cards a")
+
+    # the page name comes from the address bar: names of built-in object methods must fall back to the fleet map
+    for hostile_route in ("constructor", "__proto__", "hasOwnProperty", "toString"):
+        page.goto(f"{lab.url}/#/{hostile_route}")
+        page.wait_for_selector("svg .body")
     assert problems == []
     page.close()
 
