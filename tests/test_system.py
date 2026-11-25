@@ -5,11 +5,16 @@ Nothing is mocked here. These are the slow tests (about a minute together) and t
 
 import asyncio
 import json
+import os
+import threading
 import time
 
 import httpx
+import pytest
+import sqlalchemy as sa
 
-from tests.conftest import DatabaseOutage, Receiver, free_port, journey, wait_for
+from tests.conftest import PG_URL, DatabaseOutage, Receiver, free_port, journey, wait_for
+from themis import db
 from themis.lab import Lab
 from themis.world.sim import World
 
@@ -184,3 +189,37 @@ def test_spans_sent_during_a_database_outage_are_not_lost(db_url):
     finally:
         provider.shutdown()
         lab.stop()
+
+
+@pytest.mark.skipif(not PG_URL, reason="needs THEMIS_TEST_PG_URL")
+def test_replicas_that_start_together_on_an_empty_database_all_come_up():
+    """Found by the soak: three replicas starting at once raced to create the tables, and two of them crashed."""
+    schema = "themis_race_" + os.urandom(4).hex()
+    admin = sa.create_engine(PG_URL)
+    with admin.begin() as conn:
+        conn.execute(sa.text(f"CREATE SCHEMA {schema}"))
+    url = sa.engine.make_url(PG_URL).update_query_dict({"options": f"-csearch_path={schema}"})
+    start, errors, engines = threading.Barrier(4), [], []
+
+    def replica():
+        start.wait()
+        try:
+            engines.append(db.make_engine(url.render_as_string(hide_password=False)))
+        except Exception as e:  # noqa: BLE001 - the test reports whatever went wrong
+            errors.append(e)
+
+    threads = [threading.Thread(target=replica) for _ in range(4)]
+    try:
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(60)
+        assert errors == [] and len(engines) == 4
+        with engines[0].connect() as conn:
+            assert set(sa.inspect(conn).get_table_names()) == set(db.md.tables)
+    finally:
+        for e in engines:
+            e.dispose()
+        with admin.begin() as conn:
+            conn.execute(sa.text(f"DROP SCHEMA {schema} CASCADE"))
+        admin.dispose()

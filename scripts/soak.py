@@ -17,8 +17,8 @@ What runs:
 
 What happens, on the clock:
   1. steady state
-  2. the leader is killed with SIGKILL (a crashed node), and restarted 15 s later
-  3. the leader is stopped with SIGTERM (a rolling deploy), and restarted 5 s later
+  2. the leader is killed with SIGKILL (a crashed node), and restarted once another replica has taken over
+  3. the leader is stopped with SIGTERM (a rolling deploy), and restarted once another replica has taken over
   4. Postgres is stopped for 8 s, then started again
   5. steady state, then the load stops and everything sent is counted
 """
@@ -264,14 +264,15 @@ async def pollers(url: str, key: str, gate: int, viewers: int, stop: threading.E
 
 
 class Replica:
-    def __init__(self, n: int, env: dict):
-        self.n, self.env, self.port = n, env, free_port()
+    def __init__(self, n: int, env: dict, logs: Path | None = None):
+        self.n, self.env, self.port, self.logs = n, env, free_port(), logs
         self.url, self.proc = f"http://127.0.0.1:{self.port}", None
 
     def start(self) -> None:
         env = {**self.env, "THEMIS_INSTANCE": f"soak-replica-{self.n}"}  # Themis adds a random part per process
         cmd = [sys.executable, "-m", "themis", "serve", "--host", "127.0.0.1", "--port", str(self.port)]
-        self.proc = subprocess.Popen(cmd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        out = open(self.logs / f"replica-{self.n}.log", "a") if self.logs else subprocess.DEVNULL  # noqa: SIM115
+        self.proc = subprocess.Popen(cmd, env=env, stdout=out, stderr=subprocess.STDOUT)
 
     def metrics(self) -> dict:
         try:
@@ -302,7 +303,10 @@ def soak(args) -> dict:
         "THEMIS_BOOTSTRAP_KEY": key,
         "THEMIS_EVAL_INTERVAL": str(args.eval_interval),
     }
-    replicas = [Replica(n, env) for n in range(args.replicas)]
+    logs = Path(args.logs) if args.logs else None
+    if logs:
+        logs.mkdir(parents=True, exist_ok=True)
+    replicas = [Replica(n, env, logs) for n in range(args.replicas)]
     for r in replicas:
         r.start()
     lb_port, stats_file = free_port(), Path(args.out) / ".soak-lb.json"
@@ -322,8 +326,26 @@ def soak(args) -> dict:
                     r.proc.kill()
 
 
+def all_ready(replicas: list[Replica], limit: float = 60.0) -> None:
+    """The clock starts only when every replica is up. A run with one of three replicas proves nothing."""
+    deadline, waiting = time.time() + limit, list(replicas)
+    while waiting and time.time() < deadline:
+        for r in list(waiting):
+            if r.proc.poll() is not None:
+                sys.exit(f"replica {r.n} exited at start-up with code {r.proc.returncode}; run with --logs to see why")
+            try:
+                if httpx.get(f"{r.url}/readyz", timeout=1).status_code == 200:
+                    waiting.remove(r)
+            except httpx.HTTPError:
+                pass
+        time.sleep(0.3)
+    if waiting:
+        sys.exit(f"replicas {[r.n for r in waiting]} were not ready after {limit:.0f} s")
+
+
 def run(args, engine, key, replicas, lb_port, stats_file) -> dict:
     lb_url = f"http://127.0.0.1:{lb_port}"
+    all_ready(replicas)
     deadline = time.time() + 30
     while time.time() < deadline:
         try:
@@ -406,6 +428,9 @@ def run(args, engine, key, replicas, lb_port, stats_file) -> dict:
     else:
         mark("database outage skipped (no --db-stop / --db-start)")
     at(plan)
+    for r in replicas:  # every replica the run did not stop on purpose must still be running
+        if r.proc.poll() is not None:
+            mark("replica exited by itself", replica=r.n, code=r.proc.returncode)
     stop.set()
     for w in workers:  # let every journey in progress finish before the pipelines close
         w.join(10)
@@ -559,6 +584,8 @@ def render(d: dict) -> str:
         f"| Agent tasks counted towards SLOs (expected {dc['expected_task_events']:,}) | {dc['task_events']:,} |",
         f"| Handoffs counted towards SLOs (expected {dc['expected_handoff_events']:,}) | {dc['handoff_events']:,} |",
         "",
+        _unjudged(sent["journeys"] - st["journeys_judged"], lost),
+        "",
         "Half the agent runtimes used the OTLP exporter's default timeout and half the 30 s that",
         "`docs/INTEGRATION.md` recommends. The timeout is how long an exporter keeps retrying a batch:",
         "",
@@ -620,6 +647,17 @@ def render(d: dict) -> str:
     return "\n".join(lines)
 
 
+def _unjudged(missing: int, lost: int) -> str:
+    if not missing:
+        return "Every journey that was sent was judged."
+    if missing * SPANS_PER_JOURNEY == lost:
+        return (
+            f"The {missing:,} journeys not judged are exactly the spans given up on ({missing:,} x {SPANS_PER_JOURNEY}"
+            f" = {lost:,}): an exporter drops a whole batch, so whole journeys go missing, not parts of them."
+        )
+    return f"{missing:,} journeys were not judged, and the lost spans do not account for all of them."
+
+
 def _verdict(d: dict, lost: int, db) -> str:
     dc, groups = d["double_count_check"], d["by_exporter_timeout"]
     faults = "a crashed leader, a rolling restart" + (f" and a database outage of {db:g} seconds" if db else "")
@@ -669,6 +707,7 @@ def main() -> None:
     ap.add_argument("--viewers", type=int, default=3)
     ap.add_argument("--eval-interval", type=float, default=15.0)
     ap.add_argument("--out", default=str(REPO / "docs"))
+    ap.add_argument("--logs", default="", help="a folder for each replica's own log")
     args = ap.parse_args()
     Path(args.out).mkdir(parents=True, exist_ok=True)
     data = soak(args)
