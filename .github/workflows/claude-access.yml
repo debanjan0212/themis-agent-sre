@@ -21,7 +21,7 @@ jobs:
       ANTHROPIC_WORKSPACE_ID: wrkspc_01HBxwaDiFf5BJSWP7EuxMcK
       ANTHROPIC_SERVICE_ACCOUNT_ID: svac_01GxNFQDWfsXFH8xjjXAwHiw
       ANTHROPIC_FEDERATION_RULE_ID: fdrl_0199oZPmW3Ytm6pSSzm7JG2A
-      ANTHROPIC_IDENTITY_TOKEN_FILE: ${{ runner.temp }}/github-oidc.jwt
+      ANTHROPIC_IDENTITY_TOKEN_FILE: /tmp/github-oidc.jwt # runner.temp cannot be read at job level
     steps:
       - name: Get this run's identity token from GitHub
         run: |
