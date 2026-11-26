@@ -1,0 +1,16 @@
+Release "otel" does not exist. Installing it now.
+NAME: otel
+LAST DEPLOYED: Thu Nov 26 19:24:03 2026
+NAMESPACE: monitoring
+STATUS: deployed
+REVISION: 1
+DESCRIPTION: Install complete
+TEST SUITE: None
+NOTES:
+[WARNING] No resource limits or requests were set. Consider setting resource requests and limits for your collector(s) via the `resources` field.
+
+[WARNING] "useGOMEMLIMIT" is enabled but memory limits have not been supplied so the GOMEMLIMIT env var could not be added. Solve this problem by setting resources.limits.memory or disabling useGOMEMLIMIT
+
+[DEPRECATION] Exporter 'otlphttp' has been renamed to 'otlp_http'. Your config has been automatically rewritten for this release. Please update your values.yaml — auto-rewrite will be removed in a future release. See UPGRADING.md.
+[DEPRECATION] Pipeline 'logs' references renamed exporter 'otlphttp'. It has been automatically rewritten to 'otlp_http' for this release. Please update your values.yaml — auto-rewrite will be removed in a future release. See UPGRADING.md.
+[DEPRECATION] Pipeline 'logs' references renamed processor 'k8sattributes'. It has been automatically rewritten to 'k8s_attributes' for this release. Please update your values.yaml — auto-rewrite will be removed in a future release. See UPGRADING.md.

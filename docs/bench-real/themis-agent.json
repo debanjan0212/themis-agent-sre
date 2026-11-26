@@ -1,0 +1,49 @@
+{
+ "agent": {
+  "name": "oncall",
+  "autonomy": "autonomous",
+  "reason": null,
+  "since": 1795721165.49084,
+  "last_seen": 1795721393.052391,
+  "model": "claude-haiku-5-5",
+  "slis": [
+   {
+    "sli": "task_success",
+    "target": 0.97,
+    "value": 1.0,
+    "burn_long": 0.0,
+    "burn_short": 0.0,
+    "samples": 1,
+    "budget_left": 1.0,
+    "firing": null,
+    "rule": ""
+   }
+  ]
+ },
+ "config": {
+  "model": "claude-haiku-5-5",
+  "tools": [
+   "list_firing_alerts",
+   "golden_signals",
+   "service_dependencies",
+   "search_logs",
+   "slow_traces",
+   "workload_status",
+   "k8s_events",
+   "rollout_history",
+   "promql",
+   "gitops_history",
+   "revert_release",
+   "rollout_undo",
+   "restart_deployment"
+  ],
+  "handoffs": [],
+  "high_risk": [
+   "scale_deployment"
+  ],
+  "slo": {}
+ },
+ "events": [],
+ "gate_events": [],
+ "blamed_journeys": []
+}

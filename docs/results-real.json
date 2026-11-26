@@ -1,0 +1,573 @@
+{
+ "kind": "real",
+ "themis": "0.2.0",
+ "commit": "969470cd739aaeb3ebe1c5ab2d95f868c7d61911",
+ "run_url": "https://github.com/debanjan0212/themis-agent-sre/actions/runs/45883187675",
+ "date": "2026-11-26",
+ "brain": "claude",
+ "model": "claude-haiku-5-5",
+ "kubernetes": "v1.37.0",
+ "machine": "Linux x86_64, 4 CPUs",
+ "summary": [
+  {
+   "fault": "bad-deploy",
+   "runs": 1,
+   "fixed": 1,
+   "harmful": 0,
+   "page_s": 186.1,
+   "agent_s": 18.4,
+   "recovered_s": 101.3,
+   "model_calls": 5,
+   "tokens": 22655,
+   "cost": 0.0036331000000000002
+  }
+ ],
+ "trials": [
+  {
+   "fault": "bad-deploy",
+   "run": 1,
+   "page": {
+    "alertname": "HighErrorRate",
+    "service": "checkout",
+    "namespace": "shop",
+    "severity": "page",
+    "summary": "checkout 5xx error rate is 22.36%",
+    "active_since": "2026-11-26T19:27:29.553815989Z"
+   },
+   "page_s": 186.1,
+   "errors_at_page": {
+    "frontend": 0.2959028831562974,
+    "checkout": 0.29518072289156627,
+    "payments": 0.0
+   },
+   "agent": {
+    "run_id": "fa987abbd6c3",
+    "status": "completed",
+    "error": "",
+    "proposed": {
+     "action": "revert_release",
+     "arguments": {
+      "commit": "3a96e2f"
+     },
+     "rationale": "Checkout 5xx errors began when revision 2 (argus-demo/shop:1.4.0) rolled out. Commit 3a96e2f in shop-gitops ('checkout: release 1.4.0') is the change that introduced that image, and the timing matches. Nearly all error logs (781 of 787 lines in 10 minutes) are KeyError 'currency' on GET /, and latency and CPU/memory are normal, which points to a functional regression in the release. Reverting 3a96e2f puts Git and the cluster back on 1.3.2, which is the known-good image in revision 1. Limits: the tools did not confirm the frontend-to-checkout call path, the frontend alert was not in the firing list, and the role of commit 5ea5e79 is unverified. Reverting only 3a96e2f leaves 5ea5e79 in place.",
+     "confidence": 0.85,
+     "risk": "low"
+    },
+    "decision": {
+     "action": "revert_release",
+     "arguments": {
+      "commit": "3a96e2f"
+     },
+     "rationale": "Checkout 5xx errors began when revision 2 (argus-demo/shop:1.4.0) rolled out. Commit 3a96e2f in shop-gitops ('checkout: release 1.4.0') is the change that introduced that image, and the timing matches. Nearly all error logs (781 of 787 lines in 10 minutes) are KeyError 'currency' on GET /, and latency and CPU/memory are normal, which points to a functional regression in the release. Reverting 3a96e2f puts Git and the cluster back on 1.3.2, which is the known-good image in revision 1. Limits: the tools did not confirm the frontend-to-checkout call path, the frontend alert was not in the firing list, and the role of commit 5ea5e79 is unverified. Reverting only 3a96e2f leaves 5ea5e79 in place.",
+     "confidence": 0.85,
+     "risk": "low"
+    },
+    "allowed": true,
+    "policy_reasons": [],
+    "action": "revert_release",
+    "outcome": "done",
+    "output": "{\"reverted\": \"3a96e2f\", \"new_head\": \"0a462c8 Revert \\\"checkout: release 1.4.0\\\"\", \"applied\": [\"service/checkout unchanged\", \"service/frontend unchanged\", \"service/payments unchanged\", \"deployment.apps/checkout configured\", \"deployment.apps/frontend unchanged\", \"deployment.apps/payments unchanged\"]}",
+    "reasons": [],
+    "approval": null,
+    "analysis": {
+     "summary": "Checkout is returning 5xx errors at about 22.6% (page says 22.36%) with a baseline of 0. Nearly all error logs are `KeyError: 'currency'` in GET requests, and the errors began with checkout revision 2 (image argus-demo/shop:1.4.0), rolled out about 3 minutes ago.",
+     "findings": [
+      "checkout error_rate is 0.2259 against a baseline of 0.0, at about 11.3 rps. Latency (p95 23.75 ms) and CPU/memory are normal, so this looks like a functional failure rather than saturation.",
+      "In the last 10 minutes, 781 of 787 checkout log lines are `error KeyError: 'currency' in GET /`. The other lines are 'listening on :8080' startup messages.",
+      "rollout_history shows revision 1 (argus-demo/shop:1.3.2, 5 min old) and revision 2 (argus-demo/shop:1.4.0, 3 min old).",
+      "gitops_history commit 3a96e2f (release-bot, 3 min ago, 'checkout: release 1.4.0') changes the checkout image from 1.3.2 to 1.4.0. This matches the timing of the errors.",
+      "Commit 5ea5e79 ('shop: every service on 1.3.2', 5 min ago) adds a checkout Deployment manifest. I have not confirmed whether it changed anything that affects the failing path, so its role is unverified.",
+      "service_dependencies for checkout returns no outgoing calls, so the call path from frontend to checkout is not confirmed by the tools.",
+      "The page and golden signals report slightly different error rates (22.36% vs 0.2259). This is a minor discrepancy and does not change the diagnosis.",
+      "The frontend HighErrorRate alert is mentioned in the read-stage note, but it does not appear in the list_firing_alerts output I was given. I have not verified it."
+     ],
+     "likely_cause": "The checkout 1.4.0 release (commit 3a96e2f, image argus-demo/shop:1.4.0) introduced a regression that raises KeyError 'currency' on GET requests, causing the 5xx responses.",
+     "confidence": 0.85
+    },
+    "read_note": "**Finding: the checkout 1.4.0 release is causing the 5xx errors. The fix is to revert commit `3a96e2f`.** I have not changed anything, since this stage is read-only.\n\n**Evidence**\n- **Error rate:** checkout error rate is about 22.6% (0.2259), against a baseline of 0. Request rate is about 11 rps. Latency and CPU/memory are normal, so this is a failure, not saturation.\n- **Logs:** nearly all checkout error lines are `KeyError: 'currency' in GET /` (781 of 787 lines in the last 10 minutes). The only other lines are normal \"listening on :8080\" startup messages.\n- **Rollout:** revision 2 (image `argus-demo/shop:1.4.0`) is 3 minutes old. Revision 1 (`1.3.2`) is 5 minutes old. The errors started with the new revision.\n- **GitOps:** commit `3a96e2f` (release-bot, 3 min ago, \"checkout: release 1.4.0\") changed the image from `argus-demo/shop:1.3.2` to `1.4.0`. This is the change behind the incident.\n\n**Recommended action**\n- Revert `3a96e2f` in shop-gitops so Git and the cluster both return to `argus-demo/shop:1.3.2`. Then confirm checkout error rate returns to baseline.\n- Do not revert `5ea5e79` (\"every service on 1.3.2\"). It is older and is not the cause. Reverting it would change more than the broken release.\n\n**Unknowns and other signals**\n- The frontend `HighErrorRate` alert is also firing. Its errors may come from checkout failures, but I have not checked frontend, and the dependency graph shows no outgoing calls from checkout, so I cannot confirm the call path from here. Re-check frontend after the revert.\n- Other firing alerts are kube-system control-plane issues, including `etcdInsufficientMembers` (critical) and scrape `TargetDown` warnings. They are not shown to be related to checkout errors, but I have not investigated them. They are worth a separate look.",
+    "tools_used": [
+     {
+      "tool": "golden_signals",
+      "arguments": {
+       "service": "checkout"
+      },
+      "ok": true,
+      "output": "{\n  \"service\": \"checkout\",\n  \"request_rate_rps\": 11.316,\n  \"error_rate\": 0.2259,\n  \"error_rate_baseline\": 0.0,\n  \"p95_latency_ms\": 23.75,\n  \"p95_latency_baseline_ms\": null,\n  \"cpu_pct_of_limit\": 2.0603,\n  \"memory_pct_of_limit\": 11.2905\n}"
+     },
+     {
+      "tool": "list_firing_alerts",
+      "arguments": {},
+      "ok": true,
+      "output": "{\n  \"alerts\": [\n    {\n      \"labels\": {\n        \"alertname\": \"TargetDown\",\n        \"job\": \"kube-scheduler\",\n        \"namespace\": \"kube-system\",\n        \"service\": \"kps-kube-scheduler\",\n        \"severity\": \"warning\"\n      },\n      \"state\": \"pending\",\n      \"activeAt\": \"2026-11-26T19:25:01.232327397Z\"\n    },\n    {\n      \"labels\": {\n        \"alertname\": \"TargetDown\",\n        \"job\": \"kube-proxy\",\n        \"namespace\": \"kube-system\",\n        \"service\": \"kps-kube-proxy\",\n        \"severity\": \"warning\"\n      },\n      \"state\": \"pending\",\n      \"activeAt\": \"2026-11-26T19:25:01.232327397Z\"\n    },\n    {\n  "
+     },
+     {
+      "tool": "search_logs",
+      "arguments": {
+       "service": "checkout"
+      },
+      "ok": true,
+      "output": "{\n  \"total_lines\": 766,\n  \"top_patterns\": [\n    {\n      \"pattern\": \"error KeyError: 'currency' in GET /\",\n      \"count\": 766\n    }\n  ],\n  \"samples\": [\n    \"error KeyError: 'currency' in GET /\",\n    \"error KeyError: 'currency' in GET /\",\n    \"error KeyError: 'currency' in GET /\",\n    \"error KeyError: 'currency' in GET /\",\n    \"error KeyError: 'currency' in GET /\"\n  ]\n}"
+     },
+     {
+      "tool": "gitops_history",
+      "arguments": {
+       "limit": 5
+      },
+      "ok": true,
+      "output": "{\"repository\": \"shop-gitops\", \"commits\": [{\"commit\": \"3a96e2f\", \"author\": \"release-bot\", \"age\": \"3 minutes ago\", \"subject\": \"checkout: release 1.4.0\", \"changed\": [\"-        image: argus-demo/shop:1.3.2\", \"+        image: argus-demo/shop:1.4.0\"]}, {\"commit\": \"5ea5e79\", \"author\": \"platform\", \"age\": \"5 minutes ago\", \"subject\": \"shop: every service on 1.3.2\", \"changed\": [\"+apiVersion: apps/v1\", \"+kind: Deployment\", \"+metadata:\", \"+  name: checkout\", \"+  namespace: shop\", \"+  labels:\", \"+    app: checkout\", \"+    app.kubernetes.io/part-of: shop\", \"+spec:\", \"+  replicas: 3\", \"+  selector:\", \"+    ma"
+     },
+     {
+      "tool": "service_dependencies",
+      "arguments": {
+       "service": "checkout"
+      },
+      "ok": true,
+      "output": "{\n  \"service\": \"checkout\",\n  \"calls\": []\n}"
+     },
+     {
+      "tool": "rollout_history",
+      "arguments": {
+       "name": "checkout"
+      },
+      "ok": true,
+      "output": "{\n  \"revisions\": [\n    {\n      \"revision\": 1,\n      \"image\": \"argus-demo/shop:1.3.2\",\n      \"age_min\": 5\n    },\n    {\n      \"revision\": 2,\n      \"image\": \"argus-demo/shop:1.4.0\",\n      \"age_min\": 3\n    }\n  ]\n}"
+     },
+     {
+      "tool": "search_logs",
+      "arguments": {
+       "service": "checkout",
+       "level": "all",
+       "minutes": 10,
+       "limit": 10
+      },
+      "ok": true,
+      "output": "{\n  \"total_lines\": 787,\n  \"top_patterns\": [\n    {\n      \"pattern\": \"error KeyError: 'currency' in GET /\",\n      \"count\": 781\n    },\n    {\n      \"pattern\": \"info checkout listening on :<n>\",\n      \"count\": 6\n    }\n  ],\n  \"samples\": [\n    \"info checkout listening on :8080\",\n    \"info checkout listening on :8080\",\n    \"info checkout listening on :8080\",\n    \"error KeyError: 'currency' in GET /\",\n    \"error KeyError: 'currency' in GET /\"\n  ]\n}"
+     },
+     {
+      "tool": "revert_release",
+      "arguments": {
+       "commit": "3a96e2f"
+      },
+      "ok": true,
+      "output": "{\"reverted\": \"3a96e2f\", \"new_head\": \"0a462c8 Revert \\\"checkout: release 1.4.0\\\"\", \"applied\": [\"service/checkout unchanged\", \"service/frontend unchanged\", \"service/payments unchanged\", \"deployment.apps/checkout configured\", \"deployment.apps/frontend unchanged\", \"deployment.apps/payments unchanged\"]}"
+     }
+    ],
+    "injection_flags": [],
+    "model": "claude-haiku-5-5",
+    "model_calls": 5,
+    "input_tokens": 19236,
+    "output_tokens": 3419,
+    "seconds": 18.4
+   },
+   "recovered_s": 101.3,
+   "in_sync": true,
+   "images": {
+    "cluster": {
+     "frontend": "argus-demo/shop:1.3.2",
+     "checkout": "argus-demo/shop:1.3.2",
+     "payments": "argus-demo/shop:1.3.2"
+    },
+    "git": {
+     "frontend": "argus-demo/shop:1.3.2",
+     "checkout": "argus-demo/shop:1.3.2",
+     "payments": "argus-demo/shop:1.3.2"
+    }
+   },
+   "approvals": [],
+   "cost": 0.0036331000000000002,
+   "themis": {
+    "journey": {
+     "outcome": "success",
+     "cost": 0.0072662000000000004,
+     "tokens": 45310,
+     "span_count": 29,
+     "duration_ms": 17496.7,
+     "culprit": null,
+     "culprit_reason": null
+    },
+    "autonomy": "autonomous",
+    "gate_events": []
+   },
+   "timeline": [
+    {
+     "t": 5.0,
+     "frontend": 0.0,
+     "checkout": 0.0,
+     "payments": 0.0
+    },
+    {
+     "t": 10.0,
+     "frontend": 0.0,
+     "checkout": 0.0,
+     "payments": 0.0
+    },
+    {
+     "t": 15.1,
+     "frontend": 0.0,
+     "checkout": 0.0,
+     "payments": 0.0
+    },
+    {
+     "t": 20.1,
+     "frontend": 0.0,
+     "checkout": 0.0,
+     "payments": 0.0
+    },
+    {
+     "t": 25.2,
+     "frontend": 0.007756040285104764,
+     "checkout": 0.030355715228072275,
+     "payments": 0.0
+    },
+    {
+     "t": 30.2,
+     "frontend": 0.055383658424914314,
+     "checkout": 0.03897939073452873,
+     "payments": 0.0
+    },
+    {
+     "t": 35.2,
+     "frontend": 0.06746453245563414,
+     "checkout": 0.09332138200968894,
+     "payments": 0.0
+    },
+    {
+     "t": 40.3,
+     "frontend": 0.09751263706807449,
+     "checkout": 0.11331229305156953,
+     "payments": 0.0
+    },
+    {
+     "t": 45.3,
+     "frontend": 0.12700437962977662,
+     "checkout": 0.1317694368167941,
+     "payments": 0.0
+    },
+    {
+     "t": 50.3,
+     "frontend": 0.14200113684849372,
+     "checkout": 0.15195906788888683,
+     "payments": 0.0
+    },
+    {
+     "t": 55.3,
+     "frontend": 0.1742383302261308,
+     "checkout": 0.21855072358888145,
+     "payments": 0.0
+    },
+    {
+     "t": 60.4,
+     "frontend": 0.20483003007559866,
+     "checkout": 0.23139036629059614,
+     "payments": 0.0
+    },
+    {
+     "t": 65.4,
+     "frontend": 0.22034434587158677,
+     "checkout": 0.2712227340520131,
+     "payments": 0.0
+    },
+    {
+     "t": 70.4,
+     "frontend": 0.2499469544964489,
+     "checkout": 0.2863121266435179,
+     "payments": 0.0
+    },
+    {
+     "t": 75.5,
+     "frontend": 0.2759901841912913,
+     "checkout": 0.288993242650079,
+     "payments": 0.0
+    },
+    {
+     "t": 80.5,
+     "frontend": 0.2809667673716012,
+     "checkout": 0.28650738948398846,
+     "payments": 0.0
+    },
+    {
+     "t": 85.5,
+     "frontend": 0.2930513595166163,
+     "checkout": 0.29471477652271083,
+     "payments": 0.0
+    },
+    {
+     "t": 90.6,
+     "frontend": 0.300763358778626,
+     "checkout": 0.3009118541033435,
+     "payments": 0.0
+    },
+    {
+     "t": 95.6,
+     "frontend": 0.300763358778626,
+     "checkout": 0.3080357142857143,
+     "payments": 0.0
+    },
+    {
+     "t": 100.6,
+     "frontend": 0.2951070336391437,
+     "checkout": 0.3021472392638037,
+     "payments": 0.0
+    },
+    {
+     "t": 105.7,
+     "frontend": 0.3029850746268657,
+     "checkout": 0.3021472392638037,
+     "payments": 0.0
+    },
+    {
+     "t": 110.7,
+     "frontend": 0.3029850746268657,
+     "checkout": 0.3060921248142645,
+     "payments": 0.0
+    },
+    {
+     "t": 115.7,
+     "frontend": 0.30208333333333337,
+     "checkout": 0.3048048048048048,
+     "payments": 0.0
+    },
+    {
+     "t": 120.8,
+     "frontend": 0.3080357142857143,
+     "checkout": 0.3048048048048048,
+     "payments": 0.0
+    },
+    {
+     "t": 125.8,
+     "frontend": 0.3080357142857143,
+     "checkout": 0.31905465288035445,
+     "payments": 0.0
+    },
+    {
+     "t": 130.8,
+     "frontend": 0.30089820359281433,
+     "checkout": 0.3115727002967359,
+     "payments": 0.0
+    },
+    {
+     "t": 135.9,
+     "frontend": 0.3185840707964602,
+     "checkout": 0.3115727002967359,
+     "payments": 0.0
+    },
+    {
+     "t": 140.9,
+     "frontend": 0.3185840707964602,
+     "checkout": 0.3067669172932331,
+     "payments": 0.0
+    },
+    {
+     "t": 145.9,
+     "frontend": 0.3263473053892216,
+     "checkout": 0.31137724550898205,
+     "payments": 0.0
+    },
+    {
+     "t": 151.0,
+     "frontend": 0.31634182908545727,
+     "checkout": 0.31137724550898205,
+     "payments": 0.0
+    },
+    {
+     "t": 156.0,
+     "frontend": 0.31634182908545727,
+     "checkout": 0.31250000000000006,
+     "payments": 0.0
+    },
+    {
+     "t": 161.0,
+     "frontend": 0.30652503793626706,
+     "checkout": 0.3157894736842105,
+     "payments": 0.0
+    },
+    {
+     "t": 166.1,
+     "frontend": 0.30421686746987947,
+     "checkout": 0.3157894736842105,
+     "payments": 0.0
+    },
+    {
+     "t": 171.1,
+     "frontend": 0.30421686746987947,
+     "checkout": 0.3032159264931087,
+     "payments": 0.0
+    },
+    {
+     "t": 176.1,
+     "frontend": 0.2928679817905918,
+     "checkout": 0.29652042360060515,
+     "payments": 0.0
+    },
+    {
+     "t": 181.1,
+     "frontend": 0.2959028831562974,
+     "checkout": 0.29652042360060515,
+     "payments": 0.0
+    },
+    {
+     "t": 186.2,
+     "frontend": 0.2959028831562974,
+     "checkout": 0.29518072289156627,
+     "payments": 0.0
+    },
+    {
+     "t": 191.2,
+     "frontend": 0.29970326409495546,
+     "checkout": 0.2965722801788376,
+     "payments": 0.0
+    },
+    {
+     "t": 196.2,
+     "frontend": 0.3014925373134328,
+     "checkout": 0.2965722801788376,
+     "payments": 0.0
+    },
+    {
+     "t": 201.3,
+     "frontend": 0.3014925373134328,
+     "checkout": 0.3074581430745814,
+     "payments": 0.0
+    },
+    {
+     "t": 206.3,
+     "frontend": 0.2974963181148748,
+     "checkout": 0.29508196721311475,
+     "payments": 0.0
+    },
+    {
+     "t": 211.4,
+     "frontend": 0.31363636363636366,
+     "checkout": 0.29508196721311475,
+     "payments": 0.0
+    },
+    {
+     "t": 216.4,
+     "frontend": 0.31363636363636366,
+     "checkout": 0.3067895426220769,
+     "payments": 0.0
+    },
+    {
+     "t": 221.4,
+     "frontend": 0.2986217457886677,
+     "checkout": 0.2978492519501799,
+     "payments": 0.0
+    },
+    {
+     "t": 226.5,
+     "frontend": 0.2701062215477997,
+     "checkout": 0.29678932313682466,
+     "payments": 0.0
+    },
+    {
+     "t": 231.5,
+     "frontend": 0.2701062215477997,
+     "checkout": 0.30315860441597847,
+     "payments": 0.0
+    },
+    {
+     "t": 236.5,
+     "frontend": 0.22629969418960247,
+     "checkout": 0.2662204416271028,
+     "payments": 0.0
+    },
+    {
+     "t": 241.6,
+     "frontend": 0.19359756097560976,
+     "checkout": 0.2118722125501436,
+     "payments": 0.0
+    },
+    {
+     "t": 246.6,
+     "frontend": 0.19359756097560976,
+     "checkout": 0.17063684226712475,
+     "payments": 0.0
+    },
+    {
+     "t": 251.6,
+     "frontend": 0.13137557959814528,
+     "checkout": 0.1363658812714253,
+     "payments": 0.0
+    },
+    {
+     "t": 256.7,
+     "frontend": 0.08858858858858858,
+     "checkout": 0.09571985909522651,
+     "payments": 0.0
+    },
+    {
+     "t": 261.7,
+     "frontend": 0.08858858858858858,
+     "checkout": 0.04055912838030806,
+     "payments": 0.0
+    },
+    {
+     "t": 266.7,
+     "frontend": 0.03714710252600297,
+     "checkout": 0.0,
+     "payments": 0.0
+    },
+    {
+     "t": 271.8,
+     "frontend": 0.027231467473524965,
+     "checkout": 0.0,
+     "payments": 0.0
+    },
+    {
+     "t": 276.8,
+     "frontend": 0.027231467473524965,
+     "checkout": 0.0,
+     "payments": 0.0
+    },
+    {
+     "t": 281.8,
+     "frontend": 0.007564296520423602,
+     "checkout": 0.0,
+     "payments": 0.0
+    },
+    {
+     "t": 286.8,
+     "frontend": 0.0,
+     "checkout": 0.0,
+     "payments": 0.0
+    },
+    {
+     "t": 291.9,
+     "frontend": 0.0,
+     "checkout": 0.0,
+     "payments": 0.0
+    },
+    {
+     "t": 296.9,
+     "frontend": 0.0,
+     "checkout": 0.0,
+     "payments": 0.0
+    },
+    {
+     "t": 301.9,
+     "frontend": 0.0,
+     "checkout": 0.0,
+     "payments": 0.0
+    },
+    {
+     "t": 307.0,
+     "frontend": 0.0,
+     "checkout": 0.0,
+     "payments": 0.0
+    }
+   ],
+   "events": {
+    "page": 186.1,
+    "agent_start": 186.1,
+    "agent_end": 204.5,
+    "healthy": 287.4,
+    "end": 307.5
+   },
+   "verdict": "fixed"
+  }
+ ],
+ "screenshots": [
+  "bench-real-agent.png",
+  "bench-real-journey.png"
+ ]
+}
