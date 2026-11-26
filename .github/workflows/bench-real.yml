@@ -1,0 +1,126 @@
+# The real-tools benchmark: real faults on a real Kubernetes cluster (kind, on this runner), worked by an on-call agent
+# built on agent-harness-sdk, governed by Themis. See themis/benchreal.py for what one run does.
+#
+# Run it by hand on main: Actions > bench-real > Run workflow. The agent runs on Claude Haiku, reached through
+# workload identity federation, so no API key is stored anywhere: GitHub vouches for this run, and Anthropic trusts a
+# run of this repository's main branch (the federation rule in the Claude Console says exactly which).
+#
+# On a pull request that changes the benchmark, the same lab runs with a scripted playbook and no model at all, to
+# prove the plumbing before anyone spends a token. Those runs are never reported as results.
+name: bench-real
+
+on:
+  workflow_dispatch:
+    inputs:
+      faults:
+        description: Faults to inject, comma separated
+        default: bad-deploy
+      runs:
+        description: Runs of each fault
+        default: "1"
+      max_calls:
+        description: Hard cap on model calls in one run
+        default: "30"
+  pull_request:
+    paths:
+      - themis/benchreal.py
+      - scripts/bench_real_*
+      - scripts/pins.sh
+      - .github/workflows/bench-real.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bench-real-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  bench:
+    name: ${{ github.event_name == 'workflow_dispatch' && 'Real run on Claude Haiku' || 'Plumbing check, scripted playbook' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    permissions:
+      contents: read
+      id-token: write # only a dispatched run on main asks for a token, and only Anthropic accepts it
+    env:
+      BRAIN: ${{ github.event_name == 'workflow_dispatch' && 'claude' || 'scripted' }}
+      FAULTS: ${{ inputs.faults || 'bad-deploy' }}
+      RUNS: ${{ inputs.runs || '1' }}
+      MAX_CALLS: ${{ inputs.max_calls || '30' }}
+      PROMETHEUS_URL: http://127.0.0.1:9090
+      LOKI_URL: http://127.0.0.1:3100
+      TEMPO_URL: http://127.0.0.1:3200
+      BENCH_LOGS: /tmp/bench-real-lab
+      # Workload identity federation: these name the rule, not a secret. The token itself lives a few minutes.
+      ANTHROPIC_ORGANIZATION_ID: fd028ebf-98a0-457b-b94b-d8521e28fbee
+      ANTHROPIC_WORKSPACE_ID: wrkspc_01HBxwaDiFf5BJSWP7EuxMcK
+      ANTHROPIC_SERVICE_ACCOUNT_ID: svac_01GxNFQDWfsXFH8xjjXAwHiw
+      ANTHROPIC_FEDERATION_RULE_ID: fdrl_0199oZPmW3Ytm6pSSzm7JG2A
+      ANTHROPIC_IDENTITY_TOKEN_FILE: /tmp/github-oidc.jwt
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+
+      - name: Tools the runner already has
+        run: |
+          kind version
+          kubectl version --client
+          helm version --short
+          docker version --format 'docker {{.Server.Version}}'
+
+      - name: Themis
+        run: pip install --disable-pip-version-check -e .
+
+      - name: The agent's virtualenv, agent-harness-sdk (Claude and MCP) and Argus at their pinned commits
+        run: |
+          source scripts/pins.sh
+          clone_pinned .siblings agent-harness-sdk argus-sre-agent
+          python -m venv .siblings/venv
+          .siblings/venv/bin/pip install --disable-pip-version-check --quiet \
+            -e ".siblings/agent-harness-sdk[mcp,anthropic]" -e .siblings/argus-sre-agent
+
+      - name: Build the lab (kind, Prometheus, Loki, Tempo, the shop from Git)
+        run: scripts/bench_real_lab.sh .siblings/argus-sre-agent "$RUNNER_TEMP/gitops"
+
+      - name: Keep a fresh GitHub identity token for Claude
+        if: env.BRAIN == 'claude'
+        run: |
+          # GitHub's token lives a few minutes and the run takes longer, so a background loop renews it
+          fetch() {
+            curl -sSf -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+              "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=https://api.anthropic.com" | jq -r .value >"$ANTHROPIC_IDENTITY_TOKEN_FILE.new"
+            test -s "$ANTHROPIC_IDENTITY_TOKEN_FILE.new" && mv "$ANTHROPIC_IDENTITY_TOKEN_FILE.new" "$ANTHROPIC_IDENTITY_TOKEN_FILE"
+          }
+          fetch
+          test -s "$ANTHROPIC_IDENTITY_TOKEN_FILE"
+          (while sleep 120; do fetch || true; done) >/dev/null 2>&1 &
+
+      - name: Run the benchmark
+        run: |
+          themis bench-real --brain "$BRAIN" --faults "$FAULTS" --runs "$RUNS" --max-calls "$MAX_CALLS" \
+            --agent-python .siblings/venv/bin/python --gitops "$RUNNER_TEMP/gitops" --out bench-real-out
+
+      - name: Results on the run page
+        if: always()
+        run: cat bench-real-out/RESULTS-real.md >>"$GITHUB_STEP_SUMMARY" 2>/dev/null || echo "no results were written"
+
+      - name: What the cluster looked like
+        if: failure()
+        run: |
+          kubectl get pods -A -o wide || true
+          kubectl -n shop get events --sort-by=.lastTimestamp | tail -n 40 || true
+          for f in "$BENCH_LOGS"/*.log; do echo "== $f"; tail -n 30 "$f"; done || true
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: bench-real-${{ env.BRAIN }}
+          path: |
+            bench-real-out/
+            /tmp/bench-real-lab/
+          retention-days: 30

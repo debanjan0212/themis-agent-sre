@@ -457,3 +457,19 @@ def test_a_harness_run_that_handed_its_action_to_a_person_is_blocked_not_a_succe
     judged = ev._judge("tenant", root, [root, denied])
     assert judged["outcome"] == "blocked" and judged["culprit"] == "agent:deployer" and why in judged["culprit_reason"]
     assert ev._judge("tenant", dict(root, attrs={"agent.run.status": "completed"}), [root])["outcome"] == "success"
+
+
+def test_a_run_total_on_the_agent_span_is_not_counted_on_top_of_its_model_calls():
+    """The GenAI conventions put the run's token total on invoke_agent as well as each chat span's own usage."""
+
+    def s(sid, parent, kind, tokens):
+        return dict(trace_id="t1", span_id=sid, parent_id=parent, kind=kind, name=sid, agent="oncall", target="m",
+                    ok=True, start=1.0, end=2.0, error_type=None, cost=None, input_tokens=tokens[0],
+                    output_tokens=tokens[1], attrs={})  # fmt: skip
+
+    root = s("root", None, "agent", (2100, 80))
+    calls = [s("c1", "root", "model", (1000, 30)), s("c2", "root", "model", (1100, 50))]
+    tool = s("t", "root", "tool", (0, 0))
+    assert ev._judge("tenant", root, [root, *calls, tool])["tokens"] == 2180
+    # a runtime that only reports the total still gets it counted
+    assert ev._judge("tenant", root, [root, tool])["tokens"] == 2180

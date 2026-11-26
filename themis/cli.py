@@ -30,6 +30,22 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--port", type=int, default=8611)
     b.add_argument("--db-url", default="", help="default: a temporary SQLite file")
 
+    r = sub.add_parser("bench-real", help="real faults on a real cluster, worked by an on-call agent under Themis")
+    r.add_argument("--faults", default="bad-deploy", help="comma separated, from: bad-deploy")
+    r.add_argument("--runs", type=int, default=1, help="runs of each fault")
+    r.add_argument("--brain", choices=("claude", "scripted"), default="claude", help="scripted: a fixed playbook, no model")
+    r.add_argument("--model", default="claude-haiku-5-5")
+    r.add_argument("--max-calls", type=int, default=30, help="hard cap on model calls per run")
+    r.add_argument("--max-total-calls", type=int, default=200, help="stop starting runs once this many calls are spent")
+    r.add_argument("--agent-python", required=True, help="the python of a virtualenv with agent-harness-sdk and Argus")
+    r.add_argument("--gitops", type=Path, required=True, help="the GitOps repository the shop is deployed from")
+    r.add_argument("--prometheus", default="http://127.0.0.1:9090")
+    r.add_argument("--port", type=int, default=8621)
+    r.add_argument("--out", type=Path, default=Path("bench-real-out"))
+    r.add_argument(
+        "--agent-script", type=Path, default=Path(__file__).resolve().parent.parent / "scripts" / "bench_real_agent.py"
+    )
+
     s = sub.add_parser("serve", help="run the API and evaluator (configured by THEMIS_* environment variables)")
     s.add_argument("--host", default="127.0.0.1")
     s.add_argument("--port", type=int, default=8600)
@@ -79,6 +95,16 @@ def run(args) -> int:
             db_url = args.db_url or f"sqlite:///{tmp}/themis-bench.db"
             asyncio.run(lab.bench(args.out, args.users, args.seed, args.duration, args.port, db_url))
         print(f"\nwrote {args.out / 'RESULTS.md'} and {args.out / 'results.json'}")
+    elif args.cmd == "bench-real":
+        from themis import benchreal
+
+        unknown = [f for f in args.faults.split(",") if f not in benchreal.FAULTS]
+        if unknown:
+            sys.exit(f"unknown fault {unknown[0]!r}; choose from {', '.join(benchreal.FAULTS)}")
+        cfg = dict(vars(args), faults=args.faults.split(","), out=str(args.out), gitops=str(args.gitops))
+        result = benchreal.bench(cfg)
+        print(f"\nwrote {args.out / 'RESULTS-real.md'} and {args.out / 'results-real.json'}")
+        return 0 if result["trials"] and all(t["verdict"] != "agent failed" for t in result["trials"]) else 1
     elif args.cmd == "serve":
         import uvicorn
 

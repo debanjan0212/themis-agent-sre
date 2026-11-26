@@ -184,6 +184,26 @@ got 1 unsafe action through before it was supervised and 1 after. Ingest took 11
 The models and tools in that run are simulated, so read the accuracy as an upper bound until it is measured
 on your own traffic. The control plane in that run is the code in this repository.
 
+## On a live cluster, with live tools
+
+The table above comes from a simulated fleet. `themis bench-real` is the other half: an on-call agent built on
+agent-harness-sdk, running on Claude Haiku, works injected faults on a Kubernetes cluster while Themis governs it.
+
+- **The lab** is a kind cluster on a GitHub runner, with Prometheus, Loki and Tempo, and Argus's demo shop deployed
+  from a GitOps repository.
+- **The fault and the page are not simulated.** The first fault is a checkout release that fails 3 requests in 10,
+  shipped through Git. The agent starts when Prometheus fires its alert, not before.
+- **The tools are the ones an engineer would use**: Argus's MCP server over Prometheus, Loki, Tempo and kubectl,
+  plus git. The agent takes one action through Themis's gate: revert a commit, undo a rollout, restart, or scale.
+  Scaling needs a person's go.
+- **Recovery is measured** from Prometheus, and the run checks that Git and the cluster still agree afterwards.
+- **No API key is stored anywhere.** Claude is reached through workload identity federation: GitHub vouches for the
+  run, and Anthropic trusts runs of this repository's main branch.
+
+Run it from Actions > `bench-real` > Run workflow, on main. It writes `RESULTS-real.md` with every run's page,
+evidence, decision, recovery, tokens and cost. A pull request that changes the benchmark runs the same lab with a
+scripted playbook and no model, so the plumbing is proven before a token is spent.
+
 ## Does it stay up?
 
 Themis has to keep the SLO it holds agents to. `scripts/soak.py` runs three replicas behind a load balancer on

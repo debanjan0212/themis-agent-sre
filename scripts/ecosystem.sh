@@ -5,23 +5,12 @@
 #   ./scripts/ecosystem.sh            # uses ./.siblings
 #   ./scripts/ecosystem.sh /some/dir
 #
-# To test against newer commits, change the pins below and run it again.
+# To test against newer commits, change the pins in scripts/pins.sh and run it again.
 set -euo pipefail
 
 dir="${1:-.siblings}"
-declare -A pins=(
-  [agent-harness-sdk]=3359e5fa2b656485cb6e1ef93711ce27eaf6eb0c
-  [aegis-war-room]=6309797028ed43748ee4a406851df89a46720060
-  [argus-sre-agent]=b257343cc9e0db177394505e8ef1aab589e93b40
-  [intentops]=d30da595b1708ab363a666569c9721c6bbd7f91a
-)
-
-mkdir -p "$dir"
-for repo in "${!pins[@]}"; do
-  [ -d "$dir/$repo/.git" ] || git clone --quiet "https://github.com/debanjan0212/$repo" "$dir/$repo"
-  git -C "$dir/$repo" fetch --quiet origin "${pins[$repo]}"
-  git -C "$dir/$repo" checkout --quiet "${pins[$repo]}"
-done
+source "$(dirname "$0")/pins.sh"
+clone_pinned "$dir" "${!pins[@]}"
 
 [ -x "$dir/venv/bin/python" ] || python3 -m venv "$dir/venv"
 "$dir/venv/bin/pip" install --quiet \

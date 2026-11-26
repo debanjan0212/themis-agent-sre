@@ -366,6 +366,7 @@ def create_app(settings: Settings | None = None, engine: sa.Engine | None = None
             q = select(spans).where(spans.c.tenant_id == p.tenant_id, spans.c.trace_id == trace_id).order_by(spans.c.start)
             ss = [dict(r) for r in conn.execute(q).mappings()]
         t0 = row["start"]
+        counted = "model" if any(x["kind"] == "model" for x in ss) else None  # see engine.journey_tokens
         uses: dict[str, dict] = {}
         for x in ss:
             if x["agent"]:
@@ -377,7 +378,8 @@ def create_app(settings: Settings | None = None, engine: sa.Engine | None = None
                 if x["kind"] in ("model", "tool") and x["target"] and x["target"] not in u[x["kind"] + "s"]:
                     u[x["kind"] + "s"].append(x["target"])
                 u["cost"] += x["cost"] or 0.0
-                u["tokens"] += x["input_tokens"] + x["output_tokens"]
+                if counted is None or x["kind"] == counted:
+                    u["tokens"] += x["input_tokens"] + x["output_tokens"]
         waterfall = [
             {
                 "span_id": x["span_id"],

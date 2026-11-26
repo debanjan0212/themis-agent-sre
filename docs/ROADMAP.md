@@ -31,6 +31,7 @@ The others make agents do SRE work. Themis does SRE work on the agents.
 - Dependency quarantine with back-off
 - Root cause from evidence and from statistics, scored against ground truth in `themis bench`
 - Four chaos faults with blast-radius, detection and containment scoring
+- `themis bench-real`: an on-call agent on Claude Haiku works a real fault on a real kind cluster, with real tools, under the gate
 - Incidents as Alertmanager webhooks
 - Multi-tenant keys and scopes; SQLite or Postgres; leader-elected evaluator
 - Dashboard: fleet map, journeys, agents, chaos lab, incidents
@@ -40,7 +41,7 @@ The others make agents do SRE work. Themis does SRE work on the agents.
 | What | Why | Trigger to start |
 |---|---|---|
 | A key per agent, and spans checked against it | Today one agent could report spans in another's name (see `SECURITY.md`) | First deployment with agents from more than one team |
-| Run the benchmark with real models (Ollama on a laptop, then a paid model) | The accuracy numbers are from a simulator and are an upper bound | Before showing the numbers to a customer |
+| Real faults for `themis bench-real` beyond a bad release: an OOM kill, saturation, a tool that returns wrong data, a poisoned log line, each run three times | The first fault runs on Claude Haiku on a real cluster; one fault is not a benchmark | The first real run is in `docs/RESULTS-real.md` |
 | An adapter for the Claude Agent SDK's hooks | So the gate is enforced without hand-written glue, as it now is for agent-harness-sdk | First Claude Agent SDK agent wired to Themis |
 | MCP gateway mode: tools are called through Themis, which asks the gate | Makes the gate enforcing instead of advisory | A runtime you do not control |
 | Slow-burn tickets (the 1x / 3d rule opens a low-severity incident) | The rule is evaluated and shown, but opens nothing yet | First week of real traffic |
