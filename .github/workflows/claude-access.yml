@@ -1,0 +1,48 @@
+# Checks that this repository can call the Claude API with no stored key.
+# GitHub gives the run a short-lived identity token; the Claude Console exchanges it for an access token, because
+# a federation rule there trusts runs of this repository on main started by hand (workflow_dispatch).
+# The IDs below are not secrets: they only work together with a token GitHub issues to this repository's main.
+# Run it from Actions, "claude-access", "Run workflow".
+name: claude-access
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      ANTHROPIC_ORGANIZATION_ID: fd028ebf-98a0-457b-b94b-d8521e28fbee
+      ANTHROPIC_WORKSPACE_ID: wrkspc_01HBxwaDiFf5BJSWP7EuxMcK
+      ANTHROPIC_SERVICE_ACCOUNT_ID: svac_01GxNFQDWfsXFH8xjjXAwHiw
+      ANTHROPIC_FEDERATION_RULE_ID: fdrl_0199oZPmW3Ytm6pSSzm7JG2A
+      ANTHROPIC_IDENTITY_TOKEN_FILE: ${{ runner.temp }}/github-oidc.jwt
+    steps:
+      - name: Get this run's identity token from GitHub
+        run: |
+          curl -sSf -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=https://api.anthropic.com" \
+            | jq -r .value > "$ANTHROPIC_IDENTITY_TOKEN_FILE"
+          test -s "$ANTHROPIC_IDENTITY_TOKEN_FILE"
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+      - run: pip install --disable-pip-version-check anthropic==2.14.0
+      - name: Ask Claude one short question
+        shell: python
+        run: |
+          import anthropic
+
+          client = anthropic.Anthropic()  # reads the federation settings and the token file from the environment
+          reply = client.messages.create(
+              model="claude-haiku-5-5",
+              max_tokens=20,
+              messages=[{"role": "user", "content": "Reply with the single word: ready"}],
+          )
+          text = next(block.text for block in reply.content if block.type == "text")
+          print(f"Claude answered {text!r} using {reply.usage.input_tokens} input and {reply.usage.output_tokens} output tokens")
