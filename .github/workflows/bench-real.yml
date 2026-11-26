@@ -52,6 +52,7 @@ jobs:
       LOKI_URL: http://127.0.0.1:3100
       TEMPO_URL: http://127.0.0.1:3200
       BENCH_LOGS: /tmp/bench-real-lab
+      PYTHONUNBUFFERED: "1" # progress lines show up as they happen, not all at the end
       # Workload identity federation: these name the rule, not a secret. The token itself lives a few minutes.
       ANTHROPIC_ORGANIZATION_ID: fd028ebf-98a0-457b-b94b-d8521e28fbee
       ANTHROPIC_WORKSPACE_ID: wrkspc_01HBxwaDiFf5BJSWP7EuxMcK
@@ -105,9 +106,15 @@ jobs:
           themis bench-real --brain "$BRAIN" --faults "$FAULTS" --runs "$RUNS" --max-calls "$MAX_CALLS" \
             --agent-python .siblings/venv/bin/python --gitops "$RUNNER_TEMP/gitops" --out bench-real-out
 
-      - name: Results on the run page
+      - name: Results, on the run page and in the log
         if: always()
-        run: cat bench-real-out/RESULTS-real.md >>"$GITHUB_STEP_SUMMARY" 2>/dev/null || echo "no results were written"
+        run: |
+          if [ -f bench-real-out/RESULTS-real.md ]; then
+            cat bench-real-out/RESULTS-real.md >>"$GITHUB_STEP_SUMMARY"
+            cat bench-real-out/RESULTS-real.md
+          else
+            echo "no results were written"
+          fi
 
       - name: What the cluster looked like
         if: failure()
