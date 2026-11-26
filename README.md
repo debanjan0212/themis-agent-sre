@@ -204,6 +204,23 @@ Run it from Actions > `bench-real` > Run workflow, on main. It writes `RESULTS-r
 evidence, decision, recovery, tokens and cost. A pull request that changes the benchmark runs the same lab with a
 scripted playbook and no model, so the plumbing is proven before a token is spent.
 
+The first two runs on Claude Haiku, both on 26 November 2026 ([run 1](https://github.com/debanjan0212/themis-agent-sre/actions/runs/45883187675),
+[run 2](https://github.com/debanjan0212/themis-agent-sre/actions/runs/45886317279), written up in
+[`docs/RESULTS-real.md`](docs/RESULTS-real.md)):
+
+| Run | Prometheus paged after | Agent took | Shop healthy after the page | Model calls | Tokens | Cost |
+|---|---|---|---|---|---|---|
+| 1 | 3.1 min | 18 s | 101 s | 5 | 22,655 | $0.0036 |
+| 2 | 2.5 min | 18 s | 80 s | 5 | 23,899 | $0.0037 |
+
+Both times the agent made seven read-only tool calls, found every error log line was the same
+`KeyError: 'currency'`, tied it to the release commit in Git, and reverted that commit. Themis's gate let the revert
+through, nothing harmful ran, and Git and the cluster agreed afterwards. Two runs of one fault are a start, not a
+benchmark: three runs of each of five faults come next.
+
+Run 1 also found a bug in Themis: it counted every model call twice, because the SDK and the `anthropic` package
+both trace the same call. That is fixed, and run 2's numbers in Themis match the agent's own to the token.
+
 ## Does it stay up?
 
 Themis has to keep the SLO it holds agents to. `scripts/soak.py` runs three replicas behind a load balancer on

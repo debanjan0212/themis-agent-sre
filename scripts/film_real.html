@@ -64,6 +64,7 @@ svg text { font-family: "Sora"; }
 <script>
 "use strict";
 let D = null;  // the run, from results-real.json, set by init()
+let M = [];  // when each sentence of the current scene starts, in seconds, so pictures land with the words
 const $ = (id) => document.getElementById(id);
 const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
 const ease = (x) => { x = clamp(x); return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2; };
@@ -74,6 +75,9 @@ const pct = (v) => (v == null ? "n/a" : Math.round(v * 100) + "%");
 const mmss = (s) => { s = Math.max(0, Math.round(s)); return String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0"); };
 // an element that fades and rises in at time `at` (seconds into the scene)
 const show = (t, at, len = 0.6, rise = 26) => { const p = out(seg(t, at, at + len)); return `opacity:${p};transform:translateY(${(1 - p) * rise}px)`; };
+const m = (i, fallback) => (M[i] ?? fallback);
+// the first sentences of a long text, as many as fit in about `n` characters
+const brief = (text, n) => { let out = ""; for (const x of text.split(/(?<=[.!?])\s+(?=[A-Z])/)) { if (out && (out + " " + x).length > n) break; out += (out ? " " : "") + x; } return out; };
 const type = (text, t, at, cps = 38) => esc(text.slice(0, Math.max(0, Math.floor((t - at) * cps))));
 
 window.init = (data) => { D = data; };
@@ -81,9 +85,9 @@ window.init = (data) => { D = data; };
 // ------------------------------------------------------------------------------------------- the error-rate chart
 function chart(t0, t1, upto, opts = {}) {
   // the shop's error rate from the run's timeline, between incident seconds t0 and t1, drawn up to `upto`
-  const W = opts.w || 1180, H = opts.h || 560, pad = 70;
+  const W = opts.w || 1180, H = opts.h || 560, pad = 70, bottom = 70;
   const pts = D.trial.timeline.filter((p) => p.t >= t0 && p.t <= t1);
-  const x = (s) => pad + ((s - t0) / (t1 - t0)) * (W - pad - 20), y = (v) => H - 50 - clamp(v, 0, 0.5) / 0.5 * (H - 110);
+  const x = (s) => pad + ((s - t0) / (t1 - t0)) * (W - pad - 20), y = (v) => H - bottom - clamp(v, 0, 0.5) / 0.5 * (H - bottom - 60);
   const colors = { frontend: "#58d5ff", checkout: "#ff5d6c", payments: "#7c6bff" };
   let svg = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`;
   for (const v of [0, 0.1, 0.2, 0.3, 0.4, 0.5]) {
@@ -94,7 +98,7 @@ function chart(t0, t1, upto, opts = {}) {
   svg += `<text x="${W - 24}" y="${y(0.05) - 12}" fill="#ffb54a" font-size="20" text-anchor="end" opacity=".8">page above 5% for 2 minutes</text>`;
   for (const m of opts.marks || []) {
     if (m.t < t0 || m.t > upto) continue;
-    svg += `<line x1="${x(m.t)}" x2="${x(m.t)}" y1="40" y2="${H - 50}" stroke="${m.c}" stroke-width="2" stroke-dasharray="3 6"/>`;
+    svg += `<line x1="${x(m.t)}" x2="${x(m.t)}" y1="40" y2="${H - bottom}" stroke="${m.c}" stroke-width="2" stroke-dasharray="3 6"/>`;
     svg += `<text x="${x(m.t) + 10}" y="58" fill="${m.c}" font-size="22">${esc(m.label)}</text>`;
   }
   for (const svc of ["payments", "frontend", "checkout"]) {
@@ -104,8 +108,13 @@ function chart(t0, t1, upto, opts = {}) {
     svg += `<path d="${d}" fill="none" stroke="${colors[svc]}" stroke-width="4" stroke-linejoin="round" style="filter:drop-shadow(0 0 8px ${colors[svc]})"/>`;
     const last = vis[vis.length - 1];
     svg += `<circle cx="${x(last.t)}" cy="${y(last[svc])}" r="7" fill="${colors[svc]}"/>`;
-    svg += `<text x="${x(last.t) + 14}" y="${y(last[svc]) + 8}" fill="${colors[svc]}" font-size="24">${svc} ${pct(last[svc])}</text>`;
   }
+  ["frontend", "checkout", "payments"].forEach((svc, i) => {
+    const vis = pts.filter((p) => p.t <= upto && p[svc] != null), now = vis.length ? vis[vis.length - 1][svc] : null;
+    const lx = pad + 20 + i * 250;
+    svg += `<rect x="${lx}" y="${H - 30}" width="22" height="6" rx="3" fill="${colors[svc]}"/>`;
+    svg += `<text x="${lx + 32}" y="${H - 20}" fill="${colors[svc]}" font-size="24">${svc} ${now == null ? "" : pct(now)}</text>`;
+  });
   return svg + "</svg>";
 }
 
@@ -115,10 +124,10 @@ const S = {};
 S.hook = (t, d) => `
   <div class="abs" style="left:0;right:0;top:250px;text-align:center;${show(t, 0.2, 0.9)}">
     <div class="huge glow-a mono" style="font-weight:400">02:00</div></div>
-  <div class="abs" style="left:0;right:0;top:560px;text-align:center;font-size:54px;${show(t, d * 0.18)}">A bad release just shipped.</div>
-  <div class="abs" style="left:0;right:0;top:650px;text-align:center;font-size:54px;color:var(--mute);${show(t, d * 0.52)}">
+  <div class="abs" style="left:0;right:0;top:560px;text-align:center;font-size:54px;${show(t, m(1, d * 0.18))}">A bad release just shipped.</div>
+  <div class="abs" style="left:0;right:0;top:650px;text-align:center;font-size:54px;color:var(--mute);${show(t, m(3, d * 0.52))}">
     Tonight the engineer on call is an <span class="glow-c">AI agent</span>.</div>
-  <div class="abs" style="left:0;right:0;top:740px;text-align:center;font-size:54px;color:var(--mute);${show(t, d * 0.78)}">
+  <div class="abs" style="left:0;right:0;top:740px;text-align:center;font-size:54px;color:var(--mute);${show(t, m(3, d * 0.6) + 2.4)}">
     And <span class="glow-a">Themis</span> is watching the agent.</div>`;
 
 S.lab = (t, d) => {
@@ -137,7 +146,8 @@ S.lab = (t, d) => {
     }
     return s;
   };
-  const a = (k) => d * k;
+  const a = (k) => ({ 0.12: m(0, 0) + 1.2, 0.25: m(1, 0) + 1.6, 0.29: m(1, 0) + 2.2, 0.33: m(1, 0) + 3.2, 0.36: m(1, 0) + 3.6,
+    0.43: m(2, 0), 0.55: m(3, 0), 0.58: m(3, 0) + 0.6, 0.68: m(4, 0), 0.80: m(4, 0) + 2.6, 0.84: m(4, 0) + 3.2, 0.88: m(4, 0) + 3.6 })[k] ?? d * k;
   return `<svg class="abs" style="left:0;top:0" width="1920" height="1080">
     <g style="${show(t, a(0.12), 0.8, 0)}"><rect x="470" y="190" width="980" height="420" rx="30" fill="rgba(88,213,255,0.03)"
       stroke="rgba(88,213,255,0.35)" stroke-dasharray="10 10"/>
@@ -157,8 +167,8 @@ S.lab = (t, d) => {
 
 S.fault = (t, d) => {
   const tr = D.trial, ev = tr.events, page = ev.page;
-  const upto = seg(t, d * 0.22, d * 0.86) * page;
-  const paged = t > d * 0.86;
+  const pageAt = m(3, d * 0.8) + 2.2;
+  const upto = seg(t, m(1, d * 0.22), pageAt) * page;
   const c = D.commit;
   return `
   <div class="panel" style="left:64px;top:170px;width:560px;${show(t, 0.3)}">
@@ -167,11 +177,11 @@ S.fault = (t, d) => {
       ${esc(c.subject)}<br><br>
       <span class="minus">- image: argus-demo/shop:1.3.2</span><br><span class="plus">+ image: argus-demo/shop:1.4.0</span></div>
   </div>
-  <div class="panel" style="left:${paged ? 64 : 64}px;top:560px;width:560px;${show(t, d * 0.86, 0.5)}">
+  <div class="panel" style="left:64px;top:560px;width:560px;${show(t, pageAt, 0.5)}">
     <div class="label glow-r" style="color:var(--red)">Prometheus is paging</div>
     <div style="font-size:38px;line-height:1.25">${esc(tr.page.alertname)}<br><span style="color:var(--mute);font-size:30px">${esc(tr.page.summary)}</span></div>
   </div>
-  <div class="panel" style="left:680px;top:170px;width:1176px;height:700px;padding:24px 10px;${show(t, d * 0.12)}">
+  <div class="panel" style="left:680px;top:170px;width:1176px;height:700px;padding:24px 10px;${show(t, m(1, d * 0.12) - 0.4)}">
     <div class="label" style="margin-left:30px">Share of requests failing, live from Prometheus</div>
     ${chart(0, page + 5, upto, { w: 1150, h: 610, marks: [{ t: 0, label: "release applied", c: "#ffb54a" }] })}
   </div>`;
@@ -179,17 +189,17 @@ S.fault = (t, d) => {
 
 S.investigate = (t, d) => {
   const a = D.trial.agent, tools = D.tools;
-  const step = (d * 0.62) / Math.max(1, tools.length);
-  const rows = tools.map((o, i) => `<div class="tool" style="${show(t, 0.6 + i * step, 0.4, 12)}">
+  const t0 = m(0, 0.6) + 1.5, t1 = m(3, d * 0.62) - 0.4, step = (t1 - t0) / Math.max(1, tools.length);
+  const rows = tools.map((o, i) => `<div class="tool" style="${show(t, t0 + i * step, 0.4, 12)}">
       <span class="n">${esc(o.tool)}</span><span class="o">(${esc(o.args)})</span> <span class="o">→ ${esc(o.out)}</span></div>`).join("");
   const found = a.analysis ? a.analysis.summary : "";
   return `
   <div class="panel" style="left:64px;top:150px;width:1140px;height:760px">
     <div class="label">What the agent looked at <span style="float:right" class="glow-c">${tools.length} tool calls</span></div>${rows}</div>
-  <div class="panel" style="left:1240px;top:150px;width:616px;height:760px;${show(t, d * 0.66)}">
+  <div class="panel" style="left:1240px;top:150px;width:616px;height:760px;${show(t, m(3, d * 0.66))}">
     <div class="label">What it found</div>
-    <div style="font-size:38px;line-height:1.35">${type(found, t, d * 0.68, 30)}</div>
-    ${a.analysis && a.analysis.likely_cause ? `<div style="margin-top:34px;color:var(--mute);font-size:28px;${show(t, d * 0.9)}">Likely cause:<br><span class="glow-a">${esc(a.analysis.likely_cause)}</span></div>` : ""}
+    <div style="font-size:34px;line-height:1.35">${type(found, t, m(3, d * 0.68) + 0.4, 34)}</div>
+    ${a.analysis && a.analysis.likely_cause ? `<div style="margin-top:34px;color:var(--mute);font-size:28px;${show(t, d - 2.2)}">Likely cause:<br><span class="glow-a">${esc(a.analysis.likely_cause)}</span></div>` : ""}
   </div>`;
 };
 
@@ -201,28 +211,28 @@ S.gate = (t, d) => {
     ["Nothing it needs is quarantined", "clear"],
   ];
   const rows = checks.map(([q, a], i) => {
-    const at = d * (0.34 + i * 0.12), on = t > at;
+    const at = m(2, d * 0.34) + 0.3 + i * 2.1, on = t > at;
     return `<div class="check" style="${show(t, at - 0.3, 0.4, 10)}"><div class="dot" style="background:${on ? "var(--green)" : "var(--dim)"};box-shadow:${on ? "0 0 18px rgba(71,230,165,.7)" : "none"}">✓</div>
       <div>${q}<br><span style="color:var(--mute);font-size:26px" class="mono">${esc(a)}</span></div></div>`;
   }).join("");
-  const go = t > d * 0.72;
+  const go = t > m(3, d * 0.72);
   return `
   <div class="panel" style="left:64px;top:170px;width:820px;${show(t, 0.2)}">
     <div class="label">The agent decides</div>
     <div class="mono glow-c" style="font-size:40px">${esc(p.action)}</div>
     <div class="mono" style="font-size:28px;color:var(--mute);margin:6px 0 22px">${esc(args)}</div>
-    <div style="font-size:30px">${type(p.rationale || "", t, 0.6, 40)}</div></div>
-  <div class="panel" style="left:940px;top:170px;width:916px;height:620px;${show(t, d * 0.24)}">
+    <div style="font-size:30px">${type(brief(p.rationale || "", 190), t, 0.6, 40)}</div></div>
+  <div class="panel" style="left:940px;top:170px;width:916px;height:620px;${show(t, m(1, d * 0.24))}">
     <div class="label glow-a" style="color:var(--amber)">Themis checks it first</div>${rows}
-    <div class="big ${go ? "glow-g" : ""}" style="margin-top:28px;font-size:96px;${show(t, d * 0.72, 0.4)}">Allowed</div></div>
-  <div class="panel" style="left:64px;top:600px;width:820px;${show(t, d * 0.82)}">
+    <div class="big ${go ? "glow-g" : ""}" style="margin-top:28px;font-size:96px;${show(t, m(3, d * 0.72), 0.4)}">Allowed</div></div>
+  <div class="panel" style="left:64px;top:560px;width:820px;${show(t, m(3, d * 0.82) + 1.4)}">
     <div class="label">In Git, then on the cluster</div>
     <div class="commit"><span class="glow-g">oncall-agent</span>: Revert "${esc(D.commit.subject)}"<br><span style="color:var(--mute)">kubectl apply -k gitops</span></div></div>`;
 };
 
 S.recovery = (t, d) => {
   const ev = D.trial.events, end = ev.end;
-  const upto = ev.page + seg(t, d * 0.08, d * 0.7) * (end - ev.page);
+  const upto = ev.page + seg(t, 0.3, m(1, d * 0.7) + 0.6) * (end - ev.page);
   const marks = [
     { t: ev.page, label: "page", c: "#ff5d6c" },
     { t: ev.agent_end, label: "fix applied", c: "#47e6a5" },
@@ -233,11 +243,11 @@ S.recovery = (t, d) => {
   <div class="panel" style="left:64px;top:170px;width:1240px;height:700px;padding:24px 10px">
     <div class="label" style="margin-left:30px">Share of requests failing, from the page to the end</div>
     ${chart(Math.max(0, ev.page - 20), end + 2, upto, { w: 1215, h: 610, marks })}</div>
-  <div class="panel" style="left:1340px;top:170px;width:516px;${show(t, d * 0.62)}">
+  <div class="panel" style="left:1340px;top:170px;width:516px;${show(t, m(1, d * 0.62))}">
     <div class="label">Healthy again</div>
     <div class="big glow-g">${after == null ? "n/a" : Math.round(after) + "s"}</div>
     <div style="color:var(--mute);font-size:28px;margin-top:10px">after the page</div></div>
-  <div class="panel" style="left:1340px;top:560px;width:516px;${show(t, d * 0.8)}">
+  <div class="panel" style="left:1340px;top:560px;width:516px;${show(t, m(2, d * 0.8))}">
     <div class="check" style="padding:0"><div class="dot" style="background:var(--green)">✓</div><div style="font-size:30px">Git and the cluster agree</div></div></div>`;
 };
 
@@ -245,10 +255,10 @@ S.cost = (t, d) => {
   const a = D.trial.agent, tok = (a.input_tokens || 0) + (a.output_tokens || 0);
   const stat = (x, label, value, cls, at) => `<div class="abs" style="left:${x}px;top:330px;width:560px;${show(t, at)}">
       <div class="big ${cls}">${value}</div><div style="color:var(--mute);margin-top:18px">${label}</div></div>`;
-  return stat(120, "model calls", a.model_calls, "glow-c", d * 0.12) +
-    stat(700, "tokens", tok.toLocaleString("en-US"), "glow-c", d * 0.3) +
-    stat(1320, "for the whole incident", "$" + (D.trial.cost || 0).toFixed(4), "glow-a", d * 0.5) +
-    `<div class="abs" style="left:120px;top:640px;font-size:40px;color:var(--mute);${show(t, d * 0.72)}">
+  return stat(120, "model calls", a.model_calls, "glow-c", m(0, 0) + 1.2) +
+    stat(700, "tokens", tok.toLocaleString("en-US"), "glow-c", m(0, 0) + 2.6) +
+    stat(1320, "for the whole incident", "$" + (D.trial.cost || 0).toFixed(4), "glow-a", m(1, d * 0.5)) +
+    `<div class="abs" style="left:120px;top:640px;font-size:40px;color:var(--mute);${show(t, m(1, d * 0.5) + 0.8)}">
        Claude Haiku, list price. Less than a cent.</div>`;
 };
 
@@ -259,45 +269,50 @@ S.why = (t, d) => {
     ["A person says go", "before anything risky runs"],
     ["Root cause", "which agent, model or tool broke it"],
   ];
-  const tiles = pillars.map(([h, p], i) => `<div class="tile" style="left:${64 + i * 456}px;top:560px;width:430px;height:260px;${show(t, d * (0.48 + i * 0.1))}">
+  const tiles = pillars.map(([h, p], i) => `<div class="tile" style="left:${64 + i * 456}px;top:560px;width:430px;height:260px;${show(t, m(4 + i, d * (0.48 + i * 0.1)))}">
       <div class="label glow-a" style="color:var(--amber)">${i + 1}</div><h3>${h}</h3><p>${p}</p></div>`).join("");
   return `
-  <div class="abs" style="left:64px;top:190px;font-size:64px;line-height:1.2;${show(t, 0.2)}">AI agents are starting to run production.</div>
-  <div class="abs" style="left:64px;top:300px;font-size:64px;line-height:1.2;color:var(--mute);${show(t, d * 0.2)}">
+  <div class="abs" style="left:64px;top:190px;font-size:64px;line-height:1.2;${show(t, m(1, 0.2))}">AI agents are starting to run production.</div>
+  <div class="abs" style="left:64px;top:300px;font-size:64px;line-height:1.2;color:var(--mute);${show(t, m(2, d * 0.2))}">
     So who is on call <span class="glow-a">for the agents</span>?</div>
-  <div class="abs" style="left:64px;top:430px;font-size:40px;${show(t, d * 0.36)}"><span class="glow-a" style="font-weight:600;letter-spacing:.2em">THEMIS</span>
+  <div class="abs" style="left:64px;top:430px;font-size:40px;${show(t, m(3, d * 0.36))}"><span class="glow-a" style="font-weight:600;letter-spacing:.2em">THEMIS</span>
     <span style="color:var(--mute)">SRE for agent fleets</span></div>${tiles}`;
 };
 
 S.where = (t, d) => {
+  // the tiles land as the narration names them: one intro sentence, then one sentence per tile
   const uses = [
-    ["Platform teams", "running dozens of agents, with SLOs for each"],
-    ["Banks and hospitals", "an audit trail, and a person's go for risky actions"],
-    ["On-call and AIOps", "agents that fix incidents, kept on a short leash"],
-    ["FinOps", "token spend held inside a budget, per agent"],
-    ["Security", "an agent tricked by a poisoned log line, stopped"],
-    ["Agent platforms", "many customers' agents, one control plane"],
+    ["Platform teams", "dozens of agents, each with its own targets"],
+    ["Banks and hospitals", "an audit trail and a human sign-off"],
+    ["On-call teams", "agents that fix incidents, on a short leash"],
+    ["Finance teams", "token spend kept inside a budget"],
+    ["Security teams", "an agent tricked by a poisoned log line, stopped"],
   ];
-  const tiles = uses.map(([h, p], i) => `<div class="tile" style="left:${64 + (i % 3) * 608}px;top:${250 + Math.floor(i / 3) * 290}px;width:580px;${show(t, d * (0.1 + i * 0.12))}">
-      <div class="label glow-c">${String(i + 1).padStart(2, "0")}</div><h3>${h}</h3><p>${p}</p></div>`).join("");
+  const at = uses.map((_, i) => m(1 + i, d * (0.12 + i * 0.16)));
+  const tiles = uses.map(([h, p], i) => {
+    const x = i < 3 ? 64 + i * 608 : 368 + (i - 3) * 608, y = i < 3 ? 260 : 550;
+    return `<div class="tile" style="left:${x}px;top:${y}px;width:580px;${show(t, at[i])}">
+      <div class="label glow-c">${String(i + 1).padStart(2, "0")}</div><h3>${h}</h3><p>${p}</p></div>`;
+  }).join("");
   return `<div class="abs" style="left:64px;top:150px;font-size:56px;${show(t, 0.1)}">Where it goes next</div>${tiles}`;
 };
 
 S.close = (t, d) => {
   const r = 150 + 10 * Math.sin(t * 1.4), ang = t * 0.9;
-  return `<svg class="abs" style="left:660px;top:120px" width="600" height="600" viewBox="-300 -300 600 600">
+  return `<svg class="abs" style="left:710px;top:110px" width="500" height="500" viewBox="-300 -300 600 600">
       <circle r="${r + 70}" fill="none" stroke="#ffb54a" stroke-width="3" opacity=".8" style="filter:drop-shadow(0 0 14px #ffb54a)"/>
       <circle r="${r - 10}" fill="none" stroke="#ffb54a" stroke-width="2" stroke-dasharray="8 12" opacity=".7" transform="rotate(${-t * 20})"/>
       <circle r="16" fill="#ffb54a" style="filter:drop-shadow(0 0 16px #ffb54a)"/>
       <circle cx="${(r + 70) * Math.cos(ang)}" cy="${(r + 70) * Math.sin(ang)}" r="18" fill="#58d5ff" style="filter:drop-shadow(0 0 14px #58d5ff)"/>
     </svg>
-    <div class="abs" style="left:0;right:0;top:700px;text-align:center;font:600 120px 'Sora';letter-spacing:.3em;${show(t, 0.3, 0.9)}">THEMIS</div>
-    <div class="abs" style="left:0;right:0;top:850px;text-align:center;font-size:44px;color:var(--mute);${show(t, d * 0.3)}">SRE for agent fleets</div>
-    <div class="abs mono" style="left:0;right:0;top:940px;text-align:center;font-size:28px;color:var(--cyan);${show(t, d * 0.5)}">github.com/debanjan0212/themis-agent-sre</div>`;
+    <div class="abs" style="left:0;right:0;top:620px;text-align:center;font:600 120px 'Sora';letter-spacing:.3em;${show(t, m(1, 0.3), 0.9)}">THEMIS</div>
+    <div class="abs" style="left:0;right:0;top:770px;text-align:center;font-size:44px;color:var(--mute);${show(t, m(1, d * 0.3) + 0.9)}">SRE for agent fleets</div>
+    <div class="abs mono" style="left:0;right:0;top:850px;text-align:center;font-size:28px;color:var(--cyan);${show(t, m(1, d * 0.5) + 1.8)}">github.com/debanjan0212/themis-agent-sre</div>`;
 };
 
 // one frame: scene `name` at `t` of `d` seconds, with the caption that is being spoken
-window.frame = (name, t, d, caption, clock) => {
+window.frame = (name, t, d, caption, clock, starts) => {
+  M = starts || [];
   $("stage").innerHTML = S[name](t, d);
   $("cap").textContent = caption || "";
   $("cap").style.display = caption ? "block" : "none";

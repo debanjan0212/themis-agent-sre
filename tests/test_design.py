@@ -156,7 +156,7 @@ def test_no_filler_words_in_copy(path):
     elif path.suffix == ".css":
         text = ""  # selectors and properties are not copy
     elif path.suffix == ".md":
-        text = re.sub(r"```.*?```|`[^`]*`", " ", text, flags=re.S)  # commands and names in code are not copy
+        text = re.sub(r"```.*?```|`[^`]*`|\]\([^)]*\)", " ", text, flags=re.S)  # code and link targets are not copy
     found = sorted({w.lower() for w in re.findall(r"[A-Za-z]+", text) if w.lower() in FILLER})
     assert not found, f"{path.name} says {found}"
 
