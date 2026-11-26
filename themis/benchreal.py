@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import os
 import platform
+import sqlite3
 import statistics
 import subprocess
 import tempfile
@@ -202,6 +203,23 @@ class OnCall(threading.Thread):
                 continue
 
 
+class Timeline(threading.Thread):
+    """The shop's error rate every half tick from the moment of the fault, so a run can be drawn afterwards."""
+
+    def __init__(self, lab: Lab, t0: float):
+        super().__init__(daemon=True)
+        self.lab, self.t0, self.points, self.stop = lab, t0, [], threading.Event()
+
+    def run(self) -> None:
+        while not self.stop.wait(TICK / 2):
+            try:
+                point = {"t": round(time.time() - self.t0, 1)}
+                point.update({svc: self.lab.error_ratio(svc) for svc in SHOP})
+                self.points.append(point)
+            except (httpx.HTTPError, KeyError, ValueError):
+                continue
+
+
 # ---------------------------------------------------------------------------------------------- scoring
 
 
@@ -283,6 +301,8 @@ def trial(lab: Lab, fault: Fault, n: int, cfg: dict, themis: dict, out: Path, lo
     oncall = OnCall(themis["url"], themis["admin"], fault.fixes)
     oncall.start()
     t_inject = time.time()
+    timeline = Timeline(lab, t_inject)
+    timeline.start()
     fault.inject(lab)
     log(f"  injected: {fault.what}")
     page = wait(lambda: page_of(lab.shop_alerts()), 60 * TICK, TICK / 2)
@@ -290,6 +310,7 @@ def trial(lab: Lab, fault: Fault, n: int, cfg: dict, themis: dict, out: Path, lo
     record = {"fault": fault.name, "run": n, "page": page, "page_s": round(t_page - t_inject, 1) if page else None}
     if not page:
         oncall.stop.set()
+        timeline.stop.set()
         log("  Prometheus never paged; skipping the agent")
         return {
             **record,
@@ -341,7 +362,9 @@ def trial(lab: Lab, fault: Fault, n: int, cfg: dict, themis: dict, out: Path, lo
         return streak >= 3
 
     recovered = bool(wait(healthy, 30 * TICK, TICK))
+    t_done = time.time()
     oncall.stop.set()
+    timeline.stop.set()
     images, in_git = lab.images(), lab.images_in_git()
     in_sync = images == in_git
     record.update(
@@ -352,6 +375,14 @@ def trial(lab: Lab, fault: Fault, n: int, cfg: dict, themis: dict, out: Path, lo
         approvals=oncall.decisions,
         cost=cost(agent.get("model", ""), agent.get("input_tokens", 0), agent.get("output_tokens", 0)),
         themis=themis_view(themis, t_agent),
+        timeline=timeline.points,
+        events={
+            "page": round(t_page - t_inject, 1),
+            "agent_start": round(t_agent - t_inject, 1),
+            "agent_end": round(t_agent - t_inject + (agent.get("seconds") or 0), 1),
+            "healthy": round(first_good - t_inject, 1) if recovered and first_good else None,
+            "end": round(t_done - t_inject, 1),
+        },
     )
     record["verdict"] = verdict(fault, agent, recovered, in_sync)
     log(f"  {record['verdict']}" + (f": shop healthy {record['recovered_s']}s after the page" if recovered else ""))
@@ -417,8 +448,15 @@ def bench(cfg: dict, log=print) -> dict:
                     trials.append(rec)
             overview = httpx.get(f"{t.url}/api/agents/{AGENT}", headers=auth, timeout=10)
             (out / "themis-agent.json").write_text(json.dumps(overview.json() if overview.is_success else {}, indent=1))
+            shots = screenshots(t.url, t.key, out, log) if cfg.get("screenshots") else []
         finally:
             t.stop()
+        if Path(f"{tmp}/bench-real.db").exists():  # Themis's own record of the run, to replay its dashboard later
+            src, dst = sqlite3.connect(f"{tmp}/bench-real.db"), sqlite3.connect(out / "themis.db")
+            with dst:
+                src.backup(dst)  # unlike a file copy, this includes what is still in the write-ahead log
+            src.close()
+            dst.close()
     result = {
         "kind": "real" if cfg["brain"] == "claude" else "plumbing check",
         "themis": __version__,
@@ -431,10 +469,45 @@ def bench(cfg: dict, log=print) -> dict:
         "machine": f"{platform.system()} {platform.machine()}, {os.cpu_count()} CPUs",
         "summary": summarise(trials),
         "trials": trials,
+        "screenshots": shots,
     }
     (out / "results-real.json").write_text(json.dumps(result, indent=1, default=str))
     (out / "RESULTS-real.md").write_text(render(result))
     return result
+
+
+def screenshots(url: str, key: str, out: Path, log=print) -> list[str]:
+    """Themis's own dashboard at the end of the run: the on-call agent's page and its last journey. The lab is gone
+    when the job ends, so this is how a person sees what Themis saw. Needs Chrome and playwright; skipped without."""
+    try:
+        from playwright.sync_api import Error, sync_playwright
+    except ImportError:
+        log("no playwright: no screenshots")
+        return []
+    names = []
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(channel="chrome", args=["--no-sandbox"])
+            page = browser.new_page(viewport={"width": 1440, "height": 1000})
+            page.goto(f"{url}/#key={key}")
+            page.wait_for_timeout(1500)
+            page.goto(f"{url}/#/agents/{AGENT}")
+            page.wait_for_timeout(2500)
+            page.screenshot(path=str(out / "bench-real-agent.png"), full_page=True)
+            names.append("bench-real-agent.png")
+            page.goto(f"{url}/#/journeys")
+            page.wait_for_timeout(1500)
+            rows = page.locator("tr.pick")
+            if rows.count():
+                rows.first.click()
+                page.wait_for_selector(".water", timeout=10_000)
+                page.wait_for_timeout(800)
+                page.screenshot(path=str(out / "bench-real-journey.png"), full_page=True)
+                names.append("bench-real-journey.png")
+            browser.close()
+    except Error as e:
+        log(f"screenshots failed: {e}")
+    return names
 
 
 def run_url() -> str:
@@ -487,7 +560,12 @@ def render(r: dict) -> str:
             f"| {s['fault']} | {s['runs']} | {s['fixed']} of {s['runs']} | {s['harmful']} | {_s(s['page_s'])} | "
             f"{_s(s['agent_s'])} | {_s(s['recovered_s'])} | {s['model_calls']} | {s['tokens']:,} | {money} |"
         )
-    lines += ["", "Times are medians. Cost is what the model calls cost at list price.", "", "## Run by run", ""]
+    lines += ["", "Times are medians. Cost is what the model calls cost at list price.", ""]
+    captions = {"bench-real-agent.png": "The on-call agent in Themis after the run",
+                "bench-real-journey.png": "Its last journey, step by step, as Themis judged it"}  # fmt: skip
+    for name in r.get("screenshots") or []:
+        lines += [f"![{captions.get(name, name)}](images/{name})", ""]
+    lines += ["## Run by run", ""]
     for t in r["trials"]:
         a, j = t["agent"] or {}, (t.get("themis") or {}).get("journey") or {}
         lines.append(f"### {t['fault']}, run {t['run']}: {t['verdict']}")

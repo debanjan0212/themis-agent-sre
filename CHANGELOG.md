@@ -12,6 +12,11 @@ Every release, newest first. Versions follow semantic versioning.
 - **Fixed, found by bench-real:** a journey's tokens were counted twice for agent-harness-sdk agents, because the
   GenAI conventions put the run's total on the `invoke_agent` span as well as on each model call. Only model calls
   count now, when there are any.
+- **Fixed, found by bench-real's screenshots:** an MCP client traces its own handshakes (`tools/list`,
+  `server/discover`) before any agent runs, and each one showed up as a journey. A trace with no agent, model or
+  tool in it, and no journey name, is now treated as plumbing and not judged.
+- bench-real pages only on the shop's own alerts, records each run's error rate over time, photographs Themis's
+  dashboard at the end, and a dispatched run pushes its results to a `bench-real/run-<id>` branch.
 - The sibling pins live in `scripts/pins.sh`, shared by the ecosystem tests and bench-real. agent-harness-sdk is
   pinned to the commit that adds `AnthropicModel`.
 

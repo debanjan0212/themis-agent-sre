@@ -473,3 +473,15 @@ def test_a_run_total_on_the_agent_span_is_not_counted_on_top_of_its_model_calls(
     assert ev._judge("tenant", root, [root, *calls, tool])["tokens"] == 2180
     # a runtime that only reports the total still gets it counted
     assert ev._judge("tenant", root, [root, tool])["tokens"] == 2180
+
+
+def test_a_trace_with_no_agent_model_or_tool_is_plumbing_not_a_journey(engine, settings):
+    """MCP clients trace their own handshakes (tools/list, server/discover) before any agent runs."""
+    with engine.begin() as conn:
+        noise = Trace(T0)
+        noise.rows[0].update(name="MCP send tools/list", attrs={"mcp.method.name": "tools/list"})
+        noise.save(conn)
+        Trace(T0, name="ask_question").save(conn)  # a named journey still counts, even before any agent joins
+    ev.tick(engine, settings, T0 + 1)
+    assert [j["name"] for j in rows(engine, db.journeys)] == ["ask_question"]
+    assert ev.tick(engine, settings, T0 + 2)["journeys"] == 0  # the plumbing trace was settled, not left to retry
