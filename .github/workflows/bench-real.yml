@@ -161,7 +161,7 @@ jobs:
           # everything else (the agents' own records, Themis's database, the lab logs) for replaying the run
           cp -r /tmp/results/. docs/bench-real/
           rm -f docs/bench-real/RESULTS-real.md docs/bench-real/results-real.json docs/bench-real/*.png
-          git add docs
+          git add -f docs # -f: themis.db is ignored everywhere else, but here it is the record of the run
           git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
             commit -q -m "bench-real: results of run $GITHUB_RUN_ID"
           git push -q origin "$branch"

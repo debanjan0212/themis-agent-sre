@@ -367,9 +367,10 @@ def create_app(settings: Settings | None = None, engine: sa.Engine | None = None
             ss = [dict(r) for r in conn.execute(q).mappings()]
         t0 = row["start"]
         counted = "model" if any(x["kind"] == "model" for x in ss) else None  # see engine.journey_tokens
+        twice = ev.nested_model_calls(ss)  # one call seen by two layers of instrumentation counts once
         uses: dict[str, dict] = {}
         for x in ss:
-            if x["agent"]:
+            if x["agent"] and x["span_id"] not in twice:
                 u = uses.setdefault(
                     x["agent"],
                     {"agent": x["agent"], "pod": None, "node": None, "models": [], "tools": [], "cost": 0.0, "tokens": 0},

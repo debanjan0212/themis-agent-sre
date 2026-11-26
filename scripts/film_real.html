@@ -1,0 +1,307 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Themis on a live incident</title>
+<style>
+@font-face { font-family: "Sora"; font-weight: 200; src: url("../themis/web/fonts/sora-latin-200-normal.woff2"); }
+@font-face { font-family: "Sora"; font-weight: 300; src: url("../themis/web/fonts/sora-latin-300-normal.woff2"); }
+@font-face { font-family: "Sora"; font-weight: 400; src: url("../themis/web/fonts/sora-latin-400-normal.woff2"); }
+@font-face { font-family: "Sora"; font-weight: 600; src: url("../themis/web/fonts/sora-latin-600-normal.woff2"); }
+@font-face { font-family: "Mono"; font-weight: 400; src: url("../themis/web/fonts/jetbrains-mono-latin-400-normal.woff2"); }
+@font-face { font-family: "Mono"; font-weight: 500; src: url("../themis/web/fonts/jetbrains-mono-latin-500-normal.woff2"); }
+:root { --bg: #03060a; --ink: #e6f0f4; --mute: #7c919c; --dim: #3b4b55; --cyan: #58d5ff; --amber: #ffb54a;
+        --red: #ff5d6c; --green: #47e6a5; --line: rgba(130, 205, 230, 0.16); }
+* { box-sizing: border-box; }
+html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; background: var(--bg); color: var(--ink);
+  font: 300 34px/1.4 "Sora", sans-serif; }
+#sky { position: absolute; inset: 0;
+  background: radial-gradient(1300px 760px at 10% -10%, rgba(24, 96, 118, 0.32), transparent 62%),
+              radial-gradient(1000px 700px at 110% 0%, rgba(112, 70, 210, 0.17), transparent 60%),
+              radial-gradient(900px 600px at 50% 120%, rgba(255, 181, 74, 0.07), transparent 60%); }
+#grid { position: absolute; inset: 0; opacity: .5;
+  background-image: radial-gradient(rgba(130, 205, 230, 0.10) 1px, transparent 1.5px); background-size: 32px 32px; }
+#stage { position: absolute; inset: 0; }
+#mark { position: absolute; left: 64px; top: 46px; display: flex; gap: 18px; align-items: center;
+  font: 600 26px "Sora"; letter-spacing: .32em; }
+#mark small { font: 400 18px "Mono"; letter-spacing: .04em; color: var(--mute); }
+#clock { position: absolute; right: 64px; top: 44px; font: 500 26px "Mono"; color: var(--mute); text-align: right; }
+#clock b { color: var(--amber); font-weight: 500; }
+#cap { position: absolute; left: 50%; bottom: 54px; transform: translateX(-50%); max-width: 1500px; text-align: center;
+  font: 400 34px/1.35 "Sora"; padding: 14px 30px; border-radius: 14px; background: rgba(3, 6, 10, 0.72);
+  box-shadow: 0 0 0 1px rgba(130, 205, 230, 0.10); }
+.abs { position: absolute; }
+.panel { position: absolute; border-radius: 22px; background: rgba(10, 20, 28, 0.78);
+  box-shadow: 0 0 0 1px var(--line), 0 30px 80px rgba(0, 0, 0, 0.45); padding: 34px 40px; }
+.label { font: 500 19px "Mono"; letter-spacing: .14em; text-transform: uppercase; color: var(--mute); margin-bottom: 16px; }
+.mono { font-family: "Mono"; }
+.big { font-weight: 200; font-size: 132px; line-height: 1; letter-spacing: -0.02em; }
+.huge { font-weight: 200; font-size: 260px; line-height: 1; letter-spacing: -0.03em; }
+.glow-c { color: var(--cyan); text-shadow: 0 0 28px rgba(88, 213, 255, 0.5); }
+.glow-a { color: var(--amber); text-shadow: 0 0 30px rgba(255, 181, 74, 0.55); }
+.glow-r { color: var(--red); text-shadow: 0 0 26px rgba(255, 93, 108, 0.5); }
+.glow-g { color: var(--green); text-shadow: 0 0 26px rgba(71, 230, 165, 0.5); }
+.row { display: flex; gap: 18px; align-items: baseline; }
+.tool { font: 400 25px/1.45 "Mono"; padding: 10px 0; border-bottom: 1px solid var(--line); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
+.tool .n { color: var(--cyan); }
+.tool .o { color: var(--mute); }
+.check { display: flex; gap: 22px; align-items: center; font-size: 36px; padding: 16px 0; }
+.dot { width: 38px; height: 38px; border-radius: 50%; flex: none; display: grid; place-items: center;
+  font: 600 24px "Sora"; color: var(--bg); }
+.tile { position: absolute; width: 520px; height: 230px; border-radius: 22px; padding: 30px 34px;
+  background: rgba(10, 20, 28, 0.78); box-shadow: 0 0 0 1px var(--line); }
+.tile h3 { margin: 18px 0 8px; font: 400 34px/1.2 "Sora"; }
+.tile p { margin: 0; color: var(--mute); font-size: 25px; line-height: 1.35; }
+.commit { font: 400 26px/1.6 "Mono"; }
+.commit .minus { color: var(--red); }
+.commit .plus { color: var(--green); }
+svg text { font-family: "Sora"; }
+</style>
+<div id="sky"></div><div id="grid"></div>
+<div id="stage"></div>
+<div id="mark"><svg width="44" height="44" viewBox="0 0 32 32"><circle cx="16" cy="16" r="11" fill="none" stroke="#ffb54a" stroke-width="1.6"/><circle cx="16" cy="16" r="5.5" fill="none" stroke="#ffb54a" stroke-width="1.2" stroke-dasharray="2 2.4"/><circle cx="16" cy="16" r="2" fill="#ffb54a"/><circle cx="25.5" cy="10.5" r="2.4" fill="#58d5ff"/></svg>THEMIS<small id="sub"></small></div>
+<div id="clock"></div>
+<div id="cap"></div>
+<script>
+"use strict";
+let D = null;  // the run, from results-real.json, set by init()
+const $ = (id) => document.getElementById(id);
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const ease = (x) => { x = clamp(x); return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2; };
+const out = (x) => 1 - Math.pow(1 - clamp(x), 3);
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const pct = (v) => (v == null ? "n/a" : Math.round(v * 100) + "%");
+const mmss = (s) => { s = Math.max(0, Math.round(s)); return String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0"); };
+// an element that fades and rises in at time `at` (seconds into the scene)
+const show = (t, at, len = 0.6, rise = 26) => { const p = out(seg(t, at, at + len)); return `opacity:${p};transform:translateY(${(1 - p) * rise}px)`; };
+const type = (text, t, at, cps = 38) => esc(text.slice(0, Math.max(0, Math.floor((t - at) * cps))));
+
+window.init = (data) => { D = data; };
+
+// ------------------------------------------------------------------------------------------- the error-rate chart
+function chart(t0, t1, upto, opts = {}) {
+  // the shop's error rate from the run's timeline, between incident seconds t0 and t1, drawn up to `upto`
+  const W = opts.w || 1180, H = opts.h || 560, pad = 70;
+  const pts = D.trial.timeline.filter((p) => p.t >= t0 && p.t <= t1);
+  const x = (s) => pad + ((s - t0) / (t1 - t0)) * (W - pad - 20), y = (v) => H - 50 - clamp(v, 0, 0.5) / 0.5 * (H - 110);
+  const colors = { frontend: "#58d5ff", checkout: "#ff5d6c", payments: "#7c6bff" };
+  let svg = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`;
+  for (const v of [0, 0.1, 0.2, 0.3, 0.4, 0.5]) {
+    svg += `<line x1="${pad}" x2="${W - 20}" y1="${y(v)}" y2="${y(v)}" stroke="rgba(130,205,230,0.10)"/>`;
+    svg += `<text x="${pad - 16}" y="${y(v) + 8}" fill="#7c919c" font-size="22" text-anchor="end" font-family="Mono">${v * 100}%</text>`;
+  }
+  svg += `<line x1="${pad}" x2="${W - 20}" y1="${y(0.05)}" y2="${y(0.05)}" stroke="#ffb54a" stroke-dasharray="6 8" opacity=".55"/>`;
+  svg += `<text x="${W - 24}" y="${y(0.05) - 12}" fill="#ffb54a" font-size="20" text-anchor="end" opacity=".8">page above 5% for 2 minutes</text>`;
+  for (const m of opts.marks || []) {
+    if (m.t < t0 || m.t > upto) continue;
+    svg += `<line x1="${x(m.t)}" x2="${x(m.t)}" y1="40" y2="${H - 50}" stroke="${m.c}" stroke-width="2" stroke-dasharray="3 6"/>`;
+    svg += `<text x="${x(m.t) + 10}" y="58" fill="${m.c}" font-size="22">${esc(m.label)}</text>`;
+  }
+  for (const svc of ["payments", "frontend", "checkout"]) {
+    const vis = pts.filter((p) => p.t <= upto && p[svc] != null);
+    if (vis.length < 2) continue;
+    const d = vis.map((p, i) => (i ? "L" : "M") + x(p.t).toFixed(1) + " " + y(p[svc]).toFixed(1)).join(" ");
+    svg += `<path d="${d}" fill="none" stroke="${colors[svc]}" stroke-width="4" stroke-linejoin="round" style="filter:drop-shadow(0 0 8px ${colors[svc]})"/>`;
+    const last = vis[vis.length - 1];
+    svg += `<circle cx="${x(last.t)}" cy="${y(last[svc])}" r="7" fill="${colors[svc]}"/>`;
+    svg += `<text x="${x(last.t) + 14}" y="${y(last[svc]) + 8}" fill="${colors[svc]}" font-size="24">${svc} ${pct(last[svc])}</text>`;
+  }
+  return svg + "</svg>";
+}
+
+// ------------------------------------------------------------------------------------------- scenes
+const S = {};
+
+S.hook = (t, d) => `
+  <div class="abs" style="left:0;right:0;top:250px;text-align:center;${show(t, 0.2, 0.9)}">
+    <div class="huge glow-a mono" style="font-weight:400">02:00</div></div>
+  <div class="abs" style="left:0;right:0;top:560px;text-align:center;font-size:54px;${show(t, d * 0.18)}">A bad release just shipped.</div>
+  <div class="abs" style="left:0;right:0;top:650px;text-align:center;font-size:54px;color:var(--mute);${show(t, d * 0.52)}">
+    Tonight the engineer on call is an <span class="glow-c">AI agent</span>.</div>
+  <div class="abs" style="left:0;right:0;top:740px;text-align:center;font-size:54px;color:var(--mute);${show(t, d * 0.78)}">
+    And <span class="glow-a">Themis</span> is watching the agent.</div>`;
+
+S.lab = (t, d) => {
+  // boxes appear in the order the narration names them
+  const box = (x, y, w, h, title, sub, color, at) => `
+    <g style="${show(t, at, 0.7, 18)}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="18" fill="rgba(10,20,28,0.85)"
+      stroke="${color}" stroke-opacity=".7" stroke-width="2"/>
+    <text x="${x + 26}" y="${y + 46}" fill="#e6f0f4" font-size="30" font-weight="400">${title}</text>
+    <text x="${x + 26}" y="${y + 84}" fill="#7c919c" font-size="22" font-family="Mono">${sub}</text></g>`;
+  const flow = (x1, y1, x2, y2, color, at, phase = 0) => {
+    if (t < at) return "";
+    let s = `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${color}" stroke-opacity=".35" stroke-width="2"/>`;
+    for (let k = 0; k < 3; k++) {
+      const f = ((t - at) * 0.55 + k / 3 + phase) % 1;
+      s += `<circle cx="${x1 + (x2 - x1) * f}" cy="${y1 + (y2 - y1) * f}" r="6" fill="${color}" style="filter:drop-shadow(0 0 6px ${color})"/>`;
+    }
+    return s;
+  };
+  const a = (k) => d * k;
+  return `<svg class="abs" style="left:0;top:0" width="1920" height="1080">
+    <g style="${show(t, a(0.12), 0.8, 0)}"><rect x="470" y="190" width="980" height="420" rx="30" fill="rgba(88,213,255,0.03)"
+      stroke="rgba(88,213,255,0.35)" stroke-dasharray="10 10"/>
+      <text x="500" y="236" fill="#58d5ff" font-size="24" font-family="Mono">kind cluster, on a GitHub runner</text></g>
+    ${box(520, 300, 260, 110, "frontend", "3 pods", "#58d5ff", a(0.25))}
+    ${box(830, 300, 260, 110, "checkout", "3 pods", "#58d5ff", a(0.29))}
+    ${box(1140, 300, 260, 110, "payments", "2 pods", "#58d5ff", a(0.33))}
+    ${flow(780, 355, 830, 355, "#58d5ff", a(0.36))}${flow(1090, 355, 1140, 355, "#58d5ff", a(0.36), 0.3)}
+    ${box(520, 460, 880, 110, "Prometheus, Loki, Tempo", "metrics, logs and traces of every request", "#7c6bff", a(0.43))}
+    ${box(90, 300, 300, 110, "Git", "the shop's config", "#47e6a5", a(0.55))}
+    ${flow(390, 355, 520, 355, "#47e6a5", a(0.58))}
+    ${box(470, 770, 420, 120, "On-call agent", "Claude Haiku", "#58d5ff", a(0.68))}
+    ${box(1030, 770, 420, 120, "Themis", "checks every action first", "#ffb54a", a(0.80))}
+    ${flow(890, 830, 1030, 830, "#ffb54a", a(0.84))}${flow(1240, 770, 1100, 610, "#ffb54a", a(0.88))}
+  </svg>`;
+};
+
+S.fault = (t, d) => {
+  const tr = D.trial, ev = tr.events, page = ev.page;
+  const upto = seg(t, d * 0.22, d * 0.86) * page;
+  const paged = t > d * 0.86;
+  const c = D.commit;
+  return `
+  <div class="panel" style="left:64px;top:170px;width:560px;${show(t, 0.3)}">
+    <div class="label">New commit in Git</div>
+    <div class="commit"><span class="glow-a">${esc(c.hash)}</span> by <b style="font-weight:400">release-bot</b><br>
+      ${esc(c.subject)}<br><br>
+      <span class="minus">- image: argus-demo/shop:1.3.2</span><br><span class="plus">+ image: argus-demo/shop:1.4.0</span></div>
+  </div>
+  <div class="panel" style="left:${paged ? 64 : 64}px;top:560px;width:560px;${show(t, d * 0.86, 0.5)}">
+    <div class="label glow-r" style="color:var(--red)">Prometheus is paging</div>
+    <div style="font-size:38px;line-height:1.25">${esc(tr.page.alertname)}<br><span style="color:var(--mute);font-size:30px">${esc(tr.page.summary)}</span></div>
+  </div>
+  <div class="panel" style="left:680px;top:170px;width:1176px;height:700px;padding:24px 10px;${show(t, d * 0.12)}">
+    <div class="label" style="margin-left:30px">Share of requests failing, live from Prometheus</div>
+    ${chart(0, page + 5, upto, { w: 1150, h: 610, marks: [{ t: 0, label: "release applied", c: "#ffb54a" }] })}
+  </div>`;
+};
+
+S.investigate = (t, d) => {
+  const a = D.trial.agent, tools = D.tools;
+  const step = (d * 0.62) / Math.max(1, tools.length);
+  const rows = tools.map((o, i) => `<div class="tool" style="${show(t, 0.6 + i * step, 0.4, 12)}">
+      <span class="n">${esc(o.tool)}</span><span class="o">(${esc(o.args)})</span> <span class="o">→ ${esc(o.out)}</span></div>`).join("");
+  const found = a.analysis ? a.analysis.summary : "";
+  return `
+  <div class="panel" style="left:64px;top:150px;width:1140px;height:760px">
+    <div class="label">What the agent looked at <span style="float:right" class="glow-c">${tools.length} tool calls</span></div>${rows}</div>
+  <div class="panel" style="left:1240px;top:150px;width:616px;height:760px;${show(t, d * 0.66)}">
+    <div class="label">What it found</div>
+    <div style="font-size:38px;line-height:1.35">${type(found, t, d * 0.68, 30)}</div>
+    ${a.analysis && a.analysis.likely_cause ? `<div style="margin-top:34px;color:var(--mute);font-size:28px;${show(t, d * 0.9)}">Likely cause:<br><span class="glow-a">${esc(a.analysis.likely_cause)}</span></div>` : ""}
+  </div>`;
+};
+
+S.gate = (t, d) => {
+  const p = D.trial.agent.proposed || {}, args = Object.entries(p.arguments || {}).map(([k, v]) => `${k} ${v}`).join(", ");
+  const checks = [
+    ["On the agent's allow-list in Themis", "yes"],
+    ["Agent trusted to act on its own", D.autonomy || "autonomous"],
+    ["Nothing it needs is quarantined", "clear"],
+  ];
+  const rows = checks.map(([q, a], i) => {
+    const at = d * (0.34 + i * 0.12), on = t > at;
+    return `<div class="check" style="${show(t, at - 0.3, 0.4, 10)}"><div class="dot" style="background:${on ? "var(--green)" : "var(--dim)"};box-shadow:${on ? "0 0 18px rgba(71,230,165,.7)" : "none"}">✓</div>
+      <div>${q}<br><span style="color:var(--mute);font-size:26px" class="mono">${esc(a)}</span></div></div>`;
+  }).join("");
+  const go = t > d * 0.72;
+  return `
+  <div class="panel" style="left:64px;top:170px;width:820px;${show(t, 0.2)}">
+    <div class="label">The agent decides</div>
+    <div class="mono glow-c" style="font-size:40px">${esc(p.action)}</div>
+    <div class="mono" style="font-size:28px;color:var(--mute);margin:6px 0 22px">${esc(args)}</div>
+    <div style="font-size:30px">${type(p.rationale || "", t, 0.6, 40)}</div></div>
+  <div class="panel" style="left:940px;top:170px;width:916px;height:620px;${show(t, d * 0.24)}">
+    <div class="label glow-a" style="color:var(--amber)">Themis checks it first</div>${rows}
+    <div class="big ${go ? "glow-g" : ""}" style="margin-top:28px;font-size:96px;${show(t, d * 0.72, 0.4)}">Allowed</div></div>
+  <div class="panel" style="left:64px;top:600px;width:820px;${show(t, d * 0.82)}">
+    <div class="label">In Git, then on the cluster</div>
+    <div class="commit"><span class="glow-g">oncall-agent</span>: Revert "${esc(D.commit.subject)}"<br><span style="color:var(--mute)">kubectl apply -k gitops</span></div></div>`;
+};
+
+S.recovery = (t, d) => {
+  const ev = D.trial.events, end = ev.end;
+  const upto = ev.page + seg(t, d * 0.08, d * 0.7) * (end - ev.page);
+  const marks = [
+    { t: ev.page, label: "page", c: "#ff5d6c" },
+    { t: ev.agent_end, label: "fix applied", c: "#47e6a5" },
+  ];
+  if (ev.healthy) marks.push({ t: ev.healthy, label: "healthy", c: "#58d5ff" });
+  const after = D.trial.recovered_s;
+  return `
+  <div class="panel" style="left:64px;top:170px;width:1240px;height:700px;padding:24px 10px">
+    <div class="label" style="margin-left:30px">Share of requests failing, from the page to the end</div>
+    ${chart(Math.max(0, ev.page - 20), end + 2, upto, { w: 1215, h: 610, marks })}</div>
+  <div class="panel" style="left:1340px;top:170px;width:516px;${show(t, d * 0.62)}">
+    <div class="label">Healthy again</div>
+    <div class="big glow-g">${after == null ? "n/a" : Math.round(after) + "s"}</div>
+    <div style="color:var(--mute);font-size:28px;margin-top:10px">after the page</div></div>
+  <div class="panel" style="left:1340px;top:560px;width:516px;${show(t, d * 0.8)}">
+    <div class="check" style="padding:0"><div class="dot" style="background:var(--green)">✓</div><div style="font-size:30px">Git and the cluster agree</div></div></div>`;
+};
+
+S.cost = (t, d) => {
+  const a = D.trial.agent, tok = (a.input_tokens || 0) + (a.output_tokens || 0);
+  const stat = (x, label, value, cls, at) => `<div class="abs" style="left:${x}px;top:330px;width:560px;${show(t, at)}">
+      <div class="big ${cls}">${value}</div><div style="color:var(--mute);margin-top:18px">${label}</div></div>`;
+  return stat(120, "model calls", a.model_calls, "glow-c", d * 0.12) +
+    stat(700, "tokens", tok.toLocaleString("en-US"), "glow-c", d * 0.3) +
+    stat(1320, "for the whole incident", "$" + (D.trial.cost || 0).toFixed(4), "glow-a", d * 0.5) +
+    `<div class="abs" style="left:120px;top:640px;font-size:40px;color:var(--mute);${show(t, d * 0.72)}">
+       Claude Haiku, list price. Less than a cent.</div>`;
+};
+
+S.why = (t, d) => {
+  const pillars = [
+    ["Error budgets", "for every agent, like any other service"],
+    ["Trust is earned", "and taken away on its own when an agent misbehaves"],
+    ["A person says go", "before anything risky runs"],
+    ["Root cause", "which agent, model or tool broke it"],
+  ];
+  const tiles = pillars.map(([h, p], i) => `<div class="tile" style="left:${64 + i * 456}px;top:560px;width:430px;height:260px;${show(t, d * (0.48 + i * 0.1))}">
+      <div class="label glow-a" style="color:var(--amber)">${i + 1}</div><h3>${h}</h3><p>${p}</p></div>`).join("");
+  return `
+  <div class="abs" style="left:64px;top:190px;font-size:64px;line-height:1.2;${show(t, 0.2)}">AI agents are starting to run production.</div>
+  <div class="abs" style="left:64px;top:300px;font-size:64px;line-height:1.2;color:var(--mute);${show(t, d * 0.2)}">
+    So who is on call <span class="glow-a">for the agents</span>?</div>
+  <div class="abs" style="left:64px;top:430px;font-size:40px;${show(t, d * 0.36)}"><span class="glow-a" style="font-weight:600;letter-spacing:.2em">THEMIS</span>
+    <span style="color:var(--mute)">SRE for agent fleets</span></div>${tiles}`;
+};
+
+S.where = (t, d) => {
+  const uses = [
+    ["Platform teams", "running dozens of agents, with SLOs for each"],
+    ["Banks and hospitals", "an audit trail, and a person's go for risky actions"],
+    ["On-call and AIOps", "agents that fix incidents, kept on a short leash"],
+    ["FinOps", "token spend held inside a budget, per agent"],
+    ["Security", "an agent tricked by a poisoned log line, stopped"],
+    ["Agent platforms", "many customers' agents, one control plane"],
+  ];
+  const tiles = uses.map(([h, p], i) => `<div class="tile" style="left:${64 + (i % 3) * 608}px;top:${250 + Math.floor(i / 3) * 290}px;width:580px;${show(t, d * (0.1 + i * 0.12))}">
+      <div class="label glow-c">${String(i + 1).padStart(2, "0")}</div><h3>${h}</h3><p>${p}</p></div>`).join("");
+  return `<div class="abs" style="left:64px;top:150px;font-size:56px;${show(t, 0.1)}">Where it goes next</div>${tiles}`;
+};
+
+S.close = (t, d) => {
+  const r = 150 + 10 * Math.sin(t * 1.4), ang = t * 0.9;
+  return `<svg class="abs" style="left:660px;top:120px" width="600" height="600" viewBox="-300 -300 600 600">
+      <circle r="${r + 70}" fill="none" stroke="#ffb54a" stroke-width="3" opacity=".8" style="filter:drop-shadow(0 0 14px #ffb54a)"/>
+      <circle r="${r - 10}" fill="none" stroke="#ffb54a" stroke-width="2" stroke-dasharray="8 12" opacity=".7" transform="rotate(${-t * 20})"/>
+      <circle r="16" fill="#ffb54a" style="filter:drop-shadow(0 0 16px #ffb54a)"/>
+      <circle cx="${(r + 70) * Math.cos(ang)}" cy="${(r + 70) * Math.sin(ang)}" r="18" fill="#58d5ff" style="filter:drop-shadow(0 0 14px #58d5ff)"/>
+    </svg>
+    <div class="abs" style="left:0;right:0;top:700px;text-align:center;font:600 120px 'Sora';letter-spacing:.3em;${show(t, 0.3, 0.9)}">THEMIS</div>
+    <div class="abs" style="left:0;right:0;top:850px;text-align:center;font-size:44px;color:var(--mute);${show(t, d * 0.3)}">SRE for agent fleets</div>
+    <div class="abs mono" style="left:0;right:0;top:940px;text-align:center;font-size:28px;color:var(--cyan);${show(t, d * 0.5)}">github.com/debanjan0212/themis-agent-sre</div>`;
+};
+
+// one frame: scene `name` at `t` of `d` seconds, with the caption that is being spoken
+window.frame = (name, t, d, caption, clock) => {
+  $("stage").innerHTML = S[name](t, d);
+  $("cap").textContent = caption || "";
+  $("cap").style.display = caption ? "block" : "none";
+  $("clock").innerHTML = clock || "";
+  $("sub").textContent = D.sub || "";
+};
+</script>

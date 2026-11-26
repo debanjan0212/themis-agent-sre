@@ -130,10 +130,12 @@ def finalise(conn: sa.Connection, s: Settings, tid: str, cfg: dict, now: float) 
             continue  # no agent, model or tool in it: plumbing (an MCP handshake, a health check), not a journey
         try:
             root = min((x for x in ss if x["is_root"]), key=lambda x: x["start"])
-            trace_fixes = _resolve(ss, cfg.get("prices") or {})
-            row = _judge(tid, root, ss)
-            _account(ss, agent_cfg, s.bucket_seconds, cells)
-            _uses(ss, s.bucket_seconds, uses)
+            twice = nested_model_calls(ss)
+            trace_fixes = _resolve(ss, cfg.get("prices") or {}, twice)
+            counted = [x for x in ss if x["span_id"] not in twice]
+            row = _judge(tid, root, counted)
+            _account(counted, agent_cfg, s.bucket_seconds, cells)
+            _uses(counted, s.bucket_seconds, uses)
         except Exception:  # noqa: BLE001 - one malformed trace must never stop every other journey being judged
             log.exception("trace %s could not be judged and was skipped", trace_id)
             COUNTERS["traces_skipped"] += 1
@@ -187,7 +189,25 @@ def journey_tokens(ss: list[dict]) -> int:
     return sum(x["input_tokens"] + x["output_tokens"] for x in (models or ss))
 
 
-def _resolve(ss: list[dict], prices: dict) -> list[dict]:
+def nested_model_calls(ss: list[dict]) -> set[str]:
+    """Model calls reported twice. A model span inside another model span is the same call seen by two layers of
+    instrumentation, a framework and the provider's own client library (agent-harness-sdk with the anthropic
+    package, LangChain with OpenAI's). The outermost one counts; the ones inside it are returned here."""
+    by_id = {x["span_id"]: x for x in ss}
+    twice = set()
+    for x in ss:
+        if x["kind"] != "model":
+            continue
+        parent, hops = by_id.get(x["parent_id"]), 0
+        while parent and hops < 50:
+            if parent["kind"] == "model":
+                twice.add(x["span_id"])
+                break
+            parent, hops = by_id.get(parent["parent_id"]), hops + 1
+    return twice
+
+
+def _resolve(ss: list[dict], prices: dict, twice: frozenset[str] | set[str] = frozenset()) -> list[dict]:
     """Fill in what a span did not say itself: which agent it belongs to, and what a model call cost."""
     by_id = {x["span_id"]: x for x in ss}
     fixes = []
@@ -200,7 +220,7 @@ def _resolve(ss: list[dict], prices: dict) -> list[dict]:
                     x["agent"], changed = parent["agent"], True
                     break
                 parent, hops = by_id.get(parent["parent_id"]), hops + 1
-        if x["cost"] is None and x["kind"] == "model" and x["target"] in prices:
+        if x["cost"] is None and x["kind"] == "model" and x["target"] in prices and x["span_id"] not in twice:
             per_in, per_out = prices[x["target"]]
             x["cost"], changed = (x["input_tokens"] * per_in + x["output_tokens"] * per_out) / 1e6, True
         if changed:
