@@ -2,6 +2,19 @@
 
 Every release, newest first. Versions follow semantic versioning.
 
+## Unreleased
+
+- **`themis bench-real`:** real faults on a real kind cluster, worked by an on-call agent on agent-harness-sdk with
+  real tools (Argus's MCP server over Prometheus, Loki, Tempo and kubectl, and git), acting through the gate. Runs
+  on Claude Haiku from `.github/workflows/bench-real.yml` through workload identity federation, with a hard cap on
+  model calls; pull requests run it with a scripted playbook to prove the plumbing. The first fault is a bad
+  release shipped through Git.
+- **Fixed, found by bench-real:** a journey's tokens were counted twice for agent-harness-sdk agents, because the
+  GenAI conventions put the run's total on the `invoke_agent` span as well as on each model call. Only model calls
+  count now, when there are any.
+- The sibling pins live in `scripts/pins.sh`, shared by the ecosystem tests and bench-real. agent-harness-sdk is
+  pinned to the commit that adds `AnthropicModel`.
+
 ## 0.2.0 (25 November 2026)
 
 Held to its own SLO, and connected to the sibling projects both ways.

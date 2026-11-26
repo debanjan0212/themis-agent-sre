@@ -178,6 +178,13 @@ def finalise(conn: sa.Connection, s: Settings, tid: str, cfg: dict, now: float) 
     return len(roots)
 
 
+def journey_tokens(ss: list[dict]) -> int:
+    """Tokens a journey used. The GenAI conventions also put the run's total on the invoke_agent span, so when there
+    are model-call spans only they count; otherwise every token would be counted twice."""
+    models = [x for x in ss if x["kind"] == "model"]
+    return sum(x["input_tokens"] + x["output_tokens"] for x in (models or ss))
+
+
 def _resolve(ss: list[dict], prices: dict) -> list[dict]:
     """Fill in what a span did not say itself: which agent it belongs to, and what a model call cost."""
     by_id = {x["span_id"]: x for x in ss}
@@ -223,7 +230,7 @@ def _judge(tid: str, root: dict, ss: list[dict]) -> dict:
         "end": max(x["end"] for x in ss),
         "outcome": outcome,
         "cost": sum(x["cost"] or 0.0 for x in ss),
-        "tokens": sum(x["input_tokens"] + x["output_tokens"] for x in ss),
+        "tokens": journey_tokens(ss),
         "span_count": len(ss),
         "components": sorted({comp for x in ss if (comp := rca.component(x))}),
         "culprit": culprit[:200] if culprit else None,
