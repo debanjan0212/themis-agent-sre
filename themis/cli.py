@@ -42,6 +42,7 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--prometheus", default="http://127.0.0.1:9090")
     r.add_argument("--port", type=int, default=8621)
     r.add_argument("--out", type=Path, default=Path("bench-real-out"))
+    r.add_argument("--screenshots", action="store_true", help="photograph Themis's dashboard at the end (needs Chrome)")
     r.add_argument(
         "--agent-script", type=Path, default=Path(__file__).resolve().parent.parent / "scripts" / "bench_real_agent.py"
     )

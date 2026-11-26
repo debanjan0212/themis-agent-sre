@@ -6,8 +6,10 @@ bad release. Everything else is real: Themis, the on-call agent on agent-harness
 recorded bad-deploy incident), and git.
 """
 
+import importlib.util
 import json
 import os
+import shutil
 import stat
 import sys
 import threading
@@ -50,7 +52,7 @@ def test_every_way_a_run_can_end_has_a_plain_verdict(run, recovered, in_sync, ex
     assert br.verdict(FAULT, run, recovered, in_sync) == expected
 
 
-def test_the_page_is_the_first_shop_alert_that_fired():
+def test_the_page_is_the_first_shop_alert_that_fired_and_stock_cluster_alerts_never_page():
     alerts = [
         {"labels": {"alertname": "HighLatencyP95", "namespace": "shop", "service": "checkout"}, "state": "pending",
          "activeAt": "2026-11-26T10:00:00Z"},
@@ -59,6 +61,9 @@ def test_the_page_is_the_first_shop_alert_that_fired():
         {"labels": {"alertname": "HighErrorRate", "namespace": "shop", "service": "frontend"}, "state": "firing",
          "activeAt": "2026-11-26T10:00:30Z"},
     ]  # fmt: skip
+    stock = {"labels": {"alertname": "InfoInhibitor", "namespace": "shop", "severity": "none"}, "state": "firing",
+             "activeAt": "2026-11-26T09:00:00Z"}  # fmt: skip
+    assert br.shop_pages([stock, *alerts]) == alerts[1:2]  # only the shop's own page-severity rules page anyone
     page = br.page_of(alerts)
     assert (page["alertname"], page["service"]) == ("HighErrorRate", "frontend")
     assert br.page_of(alerts[:1]) is None  # pending is not a page
@@ -192,7 +197,7 @@ def test_a_whole_bad_release_is_paged_worked_reverted_in_git_and_judged(tmp_path
     cfg = {"faults": ["bad-deploy"], "runs": 1, "brain": "scripted", "model": "claude-haiku-5-5", "max_calls": 10,
            "max_total_calls": 50, "agent_python": PY, "agent_script": Path(__file__).parent.parent / "scripts" / "bench_real_agent.py",
            "gitops": str(gitops), "prometheus": f"http://127.0.0.1:{prom.server_port}", "port": free_port(), "out": str(out),
-           "kubectl": str(kubectl)}  # fmt: skip
+           "kubectl": str(kubectl), "screenshots": True}  # fmt: skip
     try:
         result = br.bench(cfg, log=lambda *a: None)
     finally:
@@ -208,3 +213,11 @@ def test_a_whole_bad_release_is_paged_worked_reverted_in_git_and_judged(tmp_path
     assert json.loads(state.read_text())["images"]["checkout"] == "argus-demo/shop:1.3.2"
     assert t["themis"]["journey"]["outcome"] == "success" and t["themis"]["autonomy"] == "autonomous"
     assert result["kind"] == "plumbing check" and (out / "RESULTS-real.md").read_text().startswith("# Real-tools plumbing")
+    # enough to draw the run afterwards: the error rate over time, when each thing happened, and Themis's own data
+    assert t["timeline"] and {"t", "frontend", "checkout", "payments"} <= set(t["timeline"][0])
+    ev = t["events"]
+    assert ev["page"] <= ev["agent_start"] <= ev["agent_end"] <= ev["healthy"] <= ev["end"]
+    assert (out / "themis.db").stat().st_size > 0
+    if shutil.which("google-chrome") and importlib.util.find_spec("playwright"):
+        assert result["screenshots"] == ["bench-real-agent.png", "bench-real-journey.png"]
+        assert "](images/bench-real-agent.png)" in (out / "RESULTS-real.md").read_text()

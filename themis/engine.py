@@ -126,6 +126,8 @@ def finalise(conn: sa.Connection, s: Settings, tid: str, cfg: dict, now: float) 
         ss = by_trace[trace_id]
         cells: dict[tuple, list[int]] = defaultdict(lambda: [0, 0])
         uses: dict[tuple, list] = defaultdict(lambda: [0, 0, 0.0, 0.0, None])
+        if not any(x["kind"] != "other" or x["agent"] or (x["attrs"] or {}).get("themis.journey.name") for x in ss):
+            continue  # no agent, model or tool in it: plumbing (an MCP handshake, a health check), not a journey
         try:
             root = min((x for x in ss if x["is_root"]), key=lambda x: x["start"])
             trace_fixes = _resolve(ss, cfg.get("prices") or {})

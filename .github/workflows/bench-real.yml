@@ -74,8 +74,8 @@ jobs:
           helm version --short
           docker version --format 'docker {{.Server.Version}}'
 
-      - name: Themis
-        run: pip install --disable-pip-version-check -e .
+      - name: Themis, with playwright for photographing its dashboard (Chrome is already on the runner)
+        run: pip install --disable-pip-version-check -e ".[ui-test]"
 
       - name: The agent's virtualenv, agent-harness-sdk (Claude and MCP) and Argus at their pinned commits
         run: |
@@ -104,7 +104,7 @@ jobs:
       - name: Run the benchmark
         run: |
           themis bench-real --brain "$BRAIN" --faults "$FAULTS" --runs "$RUNS" --max-calls "$MAX_CALLS" \
-            --agent-python .siblings/venv/bin/python --gitops "$RUNNER_TEMP/gitops" --out bench-real-out
+            --agent-python .siblings/venv/bin/python --gitops "$RUNNER_TEMP/gitops" --out bench-real-out --screenshots
 
       - name: Results, on the run page and in the log
         if: always()
@@ -123,11 +123,46 @@ jobs:
           kubectl -n shop get events --sort-by=.lastTimestamp | tail -n 40 || true
           for f in "$BENCH_LOGS"/*.log; do echo "== $f"; tail -n 30 "$f"; done || true
 
+      - name: Keep the lab's own logs with the results
+        if: always()
+        run: mkdir -p bench-real-out/lab && cp "$BENCH_LOGS"/*.log bench-real-out/lab/ 2>/dev/null || true
+
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: bench-real-${{ env.BRAIN }}
-          path: |
-            bench-real-out/
-            /tmp/bench-real-lab/
+          path: bench-real-out/
           retention-days: 30
+
+  # A Claude run's results go to a branch of their own, ready for a pull request. This job runs no agent code, and
+  # the job that does has no write access.
+  publish:
+    name: Results to a branch
+    needs: bench
+    if: github.event_name == 'workflow_dispatch' && !cancelled() # a failed run is worth reading too
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: bench-real-claude
+          path: /tmp/results
+      - name: Commit the results to bench-real/run-<id>
+        run: |
+          branch="bench-real/run-$GITHUB_RUN_ID"
+          git switch -c "$branch"
+          mkdir -p docs/images docs/bench-real
+          cp /tmp/results/RESULTS-real.md docs/RESULTS-real.md
+          cp /tmp/results/results-real.json docs/results-real.json
+          cp /tmp/results/*.png docs/images/ 2>/dev/null || true
+          # everything else (the agents' own records, Themis's database, the lab logs) for replaying the run
+          cp -r /tmp/results/. docs/bench-real/
+          rm -f docs/bench-real/RESULTS-real.md docs/bench-real/results-real.json docs/bench-real/*.png
+          git add docs
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -q -m "bench-real: results of run $GITHUB_RUN_ID"
+          git push -q origin "$branch"
+          echo "Results are on the branch [$branch]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/tree/$branch)" >>"$GITHUB_STEP_SUMMARY"
