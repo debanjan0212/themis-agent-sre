@@ -485,3 +485,22 @@ def test_a_trace_with_no_agent_model_or_tool_is_plumbing_not_a_journey(engine, s
     ev.tick(engine, settings, T0 + 1)
     assert [j["name"] for j in rows(engine, db.journeys)] == ["ask_question"]
     assert ev.tick(engine, settings, T0 + 2)["journeys"] == 0  # the plumbing trace was settled, not left to retry
+
+
+def test_a_model_call_seen_by_two_layers_of_instrumentation_counts_once(engine, settings):
+    """agent-harness-sdk traces each model call, and so does the anthropic package inside it: same call, same tokens."""
+    with engine.begin() as conn:
+        conn.execute(sa.update(db.tenants).values(config={"prices": {"claude-haiku-5-5": [0.10, 0.50]}}))
+        t = Trace(T0, name="page")
+        a = t.agent("oncall")
+        stage = t.add(a, "other", "agent.stage read", agent="oncall")
+        for _ in range(2):
+            outer = t.model(stage, "oncall", "claude-haiku-5-5", tokens=(4000, 600))  # the SDK's chat span
+            t.model(outer, None, "claude-haiku-5-5", tokens=(4000, 600))  # the anthropic package's own span
+        t.save(conn)
+    ev.tick(engine, settings, T0 + 1)
+    (j,) = rows(engine, db.journeys)
+    assert j["tokens"] == 2 * 4600
+    assert j["cost"] == pytest.approx(2 * (4000 * 0.10 + 600 * 0.50) / 1e6)
+    calls = {r["target"]: r["calls"] for r in rows(engine, db.edge_buckets) if r["kind"] == "model"}
+    assert calls == {"claude-haiku-5-5": 2}

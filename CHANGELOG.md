@@ -12,6 +12,11 @@ Every release, newest first. Versions follow semantic versioning.
 - **Fixed, found by bench-real:** a journey's tokens were counted twice for agent-harness-sdk agents, because the
   GenAI conventions put the run's total on the `invoke_agent` span as well as on each model call. Only model calls
   count now, when there are any.
+- **Fixed, found by the first Claude run:** each model call was counted twice, so the run's tokens and cost
+  showed double. agent-harness-sdk traces every call, and the anthropic package traces the same call again inside
+  it. A model span inside another model span is now one call: it is priced once, counted once in the journey, the
+  error budget and the fleet map, and still shown in the journey's steps. LangChain with OpenAI's instrumentation
+  nests the same way.
 - **Fixed, found by bench-real's screenshots:** an MCP client traces its own handshakes (`tools/list`,
   `server/discover`) before any agent runs, and each one showed up as a journey. A trace with no agent, model or
   tool in it, and no journey name, is now treated as plumbing and not judged.
