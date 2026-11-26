@@ -1,0 +1,8 @@
+{
+ "alertname": "HighErrorRate",
+ "service": "checkout",
+ "namespace": "shop",
+ "severity": "page",
+ "summary": "checkout 5xx error rate is 22.94%",
+ "active_since": "2026-11-26T19:52:27.243600845Z"
+}

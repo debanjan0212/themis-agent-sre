@@ -1,0 +1,117 @@
+{
+ "run_id": "096932102310",
+ "status": "completed",
+ "error": "",
+ "proposed": {
+  "action": "revert_release",
+  "arguments": {
+   "commit": "29f68e0"
+  },
+  "rationale": "Checkout 5xx errors (23%, baseline 0) began when Git commit 29f68e0 moved checkout from argus-demo/shop:1.3.2 to 1.4.0. All 712 error log lines are the same KeyError 'currency' in GET /, and no downstream calls are involved. Reverting 29f68e0 returns checkout to 1.3.2 in Git and in the cluster, so they stay in agreement. The etcd and control-plane alerts are unexplained and could slow the apply, so the result should be verified afterward.",
+  "confidence": 0.85,
+  "risk": "low"
+ },
+ "decision": {
+  "action": "revert_release",
+  "arguments": {
+   "commit": "29f68e0"
+  },
+  "rationale": "Checkout 5xx errors (23%, baseline 0) began when Git commit 29f68e0 moved checkout from argus-demo/shop:1.3.2 to 1.4.0. All 712 error log lines are the same KeyError 'currency' in GET /, and no downstream calls are involved. Reverting 29f68e0 returns checkout to 1.3.2 in Git and in the cluster, so they stay in agreement. The etcd and control-plane alerts are unexplained and could slow the apply, so the result should be verified afterward.",
+  "confidence": 0.85,
+  "risk": "low"
+ },
+ "allowed": true,
+ "policy_reasons": [],
+ "action": "revert_release",
+ "outcome": "done",
+ "output": "{\"reverted\": \"29f68e0\", \"new_head\": \"2d151be Revert \\\"checkout: release 1.4.0\\\"\", \"applied\": [\"service/checkout unchanged\", \"service/frontend unchanged\", \"service/payments unchanged\", \"deployment.apps/checkout configured\", \"deployment.apps/frontend unchanged\", \"deployment.apps/payments unchanged\"]}",
+ "reasons": [],
+ "approval": null,
+ "analysis": {
+  "summary": "Checkout 5xx errors started with the rollout of image argus-demo/shop:1.4.0 (Git commit 29f68e0), which throws KeyError 'currency' on every GET request. Error rate is about 23% against a baseline of 0, while latency and CPU/memory look normal. Control-plane alerts for etcd and kube-controller-manager are also firing, but their effect on checkout is unknown.",
+  "findings": [
+   "checkout error_rate is 0.2317 against a baseline of 0.0; request rate is about 10 rps; p95 latency is 23.75 ms and CPU/memory are low, which points to a logic failure rather than saturation.",
+   "All 712 checkout log lines match one pattern: 'error KeyError: 'currency' in GET /'.",
+   "service_dependencies shows no downstream calls for checkout, so the failing code path appears local to checkout.",
+   "rollout_history: revision 1 is argus-demo/shop:1.3.2 (4 min old) and revision 2 is argus-demo/shop:1.4.0 (3 min old).",
+   "gitops_history: commit 29f68e0 (release-bot, 3 min ago) changed the checkout image from 1.3.2 to 1.4.0. Commit a220f96 (platform, 4 min ago) created the checkout Deployment on 1.3.2 before that.",
+   "k8s_events show the 1.4.0 pods were created and the old replica set scaled down, so the rollout completed about 3 minutes ago, which matches the alert timing.",
+   "The alert reports 22.94% and golden signals report 23.17%; these are consistent given sampling.",
+   "list_firing_alerts shows etcdInsufficientMembers (critical), etcdMembersDown and control-plane target-down alerts active since about 19:50, roughly two minutes before the checkout alert. No evidence links them to checkout yet.",
+   "The 1.4.0 code diff has not been examined, so the specific bug in how 'currency' is read is unconfirmed."
+  ],
+  "likely_cause": "The checkout 1.4.0 release (image argus-demo/shop:1.4.0, Git commit 29f68e0) introduced a KeyError on 'currency' that fails every request. Reverting that commit to return checkout to 1.3.2 is the candidate remediation.",
+  "confidence": 0.85
+ },
+ "read_note": "## Findings (READ stage, no changes made)\n\n**Cause: the checkout 1.4.0 release is throwing `KeyError: 'currency'` on every request.**\n\n- **Symptom:** checkout error rate is 23.2% (the alert says 22.94%), against a baseline of 0. Request rate is about 10 rps. Latency and CPU/memory look normal, so this is a logic failure, not saturation.\n- **Logs:** 712 error lines, all the same pattern: `error KeyError: 'currency' in GET /`. checkout has no downstream calls in the trace graph, so the failure is local to checkout.\n- **Timing:** the rollout history shows revision 1 on `argus-demo/shop:1.3.2` (4 min old) and revision 2 on `argus-demo/shop:1.4.0` (3 min old). The rollout completed about 3 minutes ago, and the alert has been active since 19:52, which fits.\n- **Git:** commit `29f68e0` by release-bot, \"checkout: release 1.4.0\", changed the image from `argus-demo/shop:1.3.2` to `argus-demo/shop:1.4.0`. Commit `a220f96` (platform, 4 min ago) only set the checkout Deployment baseline to 1.3.2 and came before it.\n- **Pods:** the rollout replaced all three pods. Two readiness probes failed with \"connection refused\" during the rollout, then the pods came up.\n\n**Likely fix:** revert commit `29f68e0` in shop-gitops. That puts checkout back on 1.3.2, which had zero errors, and keeps Git and the cluster in agreement. I have not done this because this stage is read-only. The 1.4.0 code itself is not confirmed as the bug: the evidence is the timing and the single error signature. I have not seen the 1.4.0 diff, so I can't say what changed in how `currency` is read.\n\n**Unrelated, not investigated further:** the firing alerts also include etcdInsufficientMembers (critical), etcdMembersDown, and several kube-controller-manager, kube-scheduler, and kube-proxy target-down alerts on the control plane (`themis-bench-control-plane`). They started around 19:50, about two minutes before the checkout alert. They are a separate control-plane problem, and I don't yet know whether they affect checkout. Someone should look at etcd health separately.",
+ "tools_used": [
+  {
+   "tool": "golden_signals",
+   "arguments": {
+    "service": "checkout"
+   },
+   "ok": true,
+   "output": "{\n  \"service\": \"checkout\",\n  \"request_rate_rps\": 10.1133,\n  \"error_rate\": 0.2317,\n  \"error_rate_baseline\": 0.0,\n  \"p95_latency_ms\": 23.75,\n  \"p95_latency_baseline_ms\": null,\n  \"cpu_pct_of_limit\": 1.7342,\n  \"memory_pct_of_limit\": 11.2645\n}"
+  },
+  {
+   "tool": "list_firing_alerts",
+   "arguments": {},
+   "ok": true,
+   "output": "{\n  \"alerts\": [\n    {\n      \"labels\": {\n        \"alertname\": \"KubeControllerManagerInstanceUnreachable\",\n        \"container\": \"kube-controller-manager\",\n        \"endpoint\": \"http-metrics\",\n        \"instance\": \"172.18.0.2:10257\",\n        \"job\": \"kube-controller-manager\",\n        \"namespace\": \"kube-system\",\n        \"pod\": \"kube-controller-manager-themis-bench-control-plane\",\n        \"service\": \"kps-kube-controller-manager\",\n        \"severity\": \"warning\"\n      },\n      \"state\": \"pending\",\n      \"activeAt\": \"2026-11-26T19:50:21.754900697Z\"\n    },\n    {\n      \"labels\": {\n        \"alertname\": \"etcdM"
+  },
+  {
+   "tool": "search_logs",
+   "arguments": {
+    "service": "checkout"
+   },
+   "ok": true,
+   "output": "{\n  \"total_lines\": 712,\n  \"top_patterns\": [\n    {\n      \"pattern\": \"error KeyError: 'currency' in GET /\",\n      \"count\": 712\n    }\n  ],\n  \"samples\": [\n    \"error KeyError: 'currency' in GET /\",\n    \"error KeyError: 'currency' in GET /\",\n    \"error KeyError: 'currency' in GET /\",\n    \"error KeyError: 'currency' in GET /\",\n    \"error KeyError: 'currency' in GET /\"\n  ]\n}"
+  },
+  {
+   "tool": "service_dependencies",
+   "arguments": {
+    "service": "checkout"
+   },
+   "ok": true,
+   "output": "{\n  \"service\": \"checkout\",\n  \"calls\": []\n}"
+  },
+  {
+   "tool": "rollout_history",
+   "arguments": {
+    "name": "checkout"
+   },
+   "ok": true,
+   "output": "{\n  \"revisions\": [\n    {\n      \"revision\": 1,\n      \"image\": \"argus-demo/shop:1.3.2\",\n      \"age_min\": 4\n    },\n    {\n      \"revision\": 2,\n      \"image\": \"argus-demo/shop:1.4.0\",\n      \"age_min\": 3\n    }\n  ]\n}"
+  },
+  {
+   "tool": "gitops_history",
+   "arguments": {
+    "limit": 5
+   },
+   "ok": true,
+   "output": "{\"repository\": \"shop-gitops\", \"commits\": [{\"commit\": \"29f68e0\", \"author\": \"release-bot\", \"age\": \"3 minutes ago\", \"subject\": \"checkout: release 1.4.0\", \"changed\": [\"-        image: argus-demo/shop:1.3.2\", \"+        image: argus-demo/shop:1.4.0\"]}, {\"commit\": \"a220f96\", \"author\": \"platform\", \"age\": \"4 minutes ago\", \"subject\": \"shop: every service on 1.3.2\", \"changed\": [\"+apiVersion: apps/v1\", \"+kind: Deployment\", \"+metadata:\", \"+  name: checkout\", \"+  namespace: shop\", \"+  labels:\", \"+    app: checkout\", \"+    app.kubernetes.io/part-of: shop\", \"+spec:\", \"+  replicas: 3\", \"+  selector:\", \"+    ma"
+  },
+  {
+   "tool": "k8s_events",
+   "arguments": {
+    "name": "checkout"
+   },
+   "ok": true,
+   "output": "{\n  \"events\": [\n    {\n      \"type\": \"Normal\",\n      \"reason\": \"Pulled\",\n      \"message\": \"Container image \\\"argus-demo/shop:1.4.0\\\" already present on machine and can be accessed by the pod\",\n      \"count\": 1,\n      \"age_min\": 3\n    },\n    {\n      \"type\": \"Normal\",\n      \"reason\": \"SuccessfulCreate\",\n      \"message\": \"Created pod: checkout-76b995b886-2bcqd\",\n      \"count\": 1,\n      \"age_min\": 3\n    },\n    {\n      \"type\": \"Normal\",\n      \"reason\": \"ScalingReplicaSet\",\n      \"message\": \"Scaled down replica set checkout-586b5f7d67 from 3 to 2\",\n      \"count\": 1,\n      \"age_min\": 3\n    },\n    {\n  "
+  },
+  {
+   "tool": "revert_release",
+   "arguments": {
+    "commit": "29f68e0"
+   },
+   "ok": true,
+   "output": "{\"reverted\": \"29f68e0\", \"new_head\": \"2d151be Revert \\\"checkout: release 1.4.0\\\"\", \"applied\": [\"service/checkout unchanged\", \"service/frontend unchanged\", \"service/payments unchanged\", \"deployment.apps/checkout configured\", \"deployment.apps/frontend unchanged\", \"deployment.apps/payments unchanged\"]}"
+  }
+ ],
+ "injection_flags": [],
+ "model": "claude-haiku-5-5",
+ "model_calls": 5,
+ "input_tokens": 20653,
+ "output_tokens": 3246,
+ "seconds": 17.6
+}

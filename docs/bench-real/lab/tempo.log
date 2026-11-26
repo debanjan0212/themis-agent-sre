@@ -1,0 +1,9 @@
+Release "tempo" does not exist. Installing it now.
+level=WARN msg="this chart is deprecated"
+NAME: tempo
+LAST DEPLOYED: Thu Nov 26 19:49:27 2026
+NAMESPACE: monitoring
+STATUS: deployed
+REVISION: 1
+DESCRIPTION: Install complete
+TEST SUITE: None

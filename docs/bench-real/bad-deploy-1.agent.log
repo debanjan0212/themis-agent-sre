@@ -1,0 +1,2 @@
+{"status": "completed", "action": "revert_release", "outcome": "done", "model_calls": 5, "input_tokens": 20653, "output_tokens": 3246, "seconds": 17.6}
+
