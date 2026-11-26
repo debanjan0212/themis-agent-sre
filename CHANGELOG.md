@@ -12,6 +12,10 @@ Every release, newest first. Versions follow semantic versioning.
 - **Fixed, found by bench-real:** a journey's tokens were counted twice for agent-harness-sdk agents, because the
   GenAI conventions put the run's total on the `invoke_agent` span as well as on each model call. Only model calls
   count now, when there are any.
+- **First results on Claude Haiku** in `docs/RESULTS-real.md`: two runs of the bad release, both fixed by a
+  revert in Git, the shop healthy 101 s and 80 s after the page, about 23,000 tokens and $0.0037 a run.
+- `scripts/film_real.py` films one bench-real incident as a narrated demo from the run's own records, and replays
+  Themis's dashboard from the run's database.
 - **Fixed, found by the first Claude run:** each model call was counted twice, so the run's tokens and cost
   showed double. agent-harness-sdk traces every call, and the anthropic package traces the same call again inside
   it. A model span inside another model span is now one call: it is priced once, counted once in the journey, the
