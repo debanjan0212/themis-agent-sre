@@ -78,7 +78,7 @@ class Lab:
         return r.raise_for_status().json()["data"]
 
     def shop_alerts(self) -> list[dict]:
-        return [a for a in self.prom("/api/v1/alerts")["alerts"] if a["labels"].get("namespace") == "shop"]
+        return shop_pages(self.prom("/api/v1/alerts")["alerts"])
 
     def error_ratio(self, svc: str, window: str = "1m") -> float | None:
         """Share of a service's requests that failed with 5xx over the last minute; None when it served nothing."""
@@ -99,6 +99,13 @@ class Lab:
             text = (self.gitops / "apps" / d / "deployment.yaml").read_text()
             out[d] = next(line.split("image:", 1)[1].strip() for line in text.splitlines() if "image:" in line)
         return out
+
+
+def shop_pages(alerts: list[dict]) -> list[dict]:
+    """The shop's own paging alerts (deploy/k8s/shop-monitoring.yaml in Argus), pending or firing. The cluster's
+    stock rules also label alerts with namespace=shop (CPUThrottlingHigh, InfoInhibitor), but nobody is paged for
+    those, so they neither start a run nor keep the shop from counting as quiet."""
+    return [a for a in alerts if a["labels"].get("namespace") == "shop" and a["labels"].get("severity") == "page"]
 
 
 def run(cmd: list[str], cwd: Path | None = None, timeout: float = 120) -> str:
@@ -295,6 +302,7 @@ def trial(lab: Lab, fault: Fault, n: int, cfg: dict, themis: dict, out: Path, lo
             "approvals": [],
         }
     log(f"  paged after {record['page_s']}s: {page['summary']}")
+    record["errors_at_page"] = {s: lab.error_ratio(s) for s in SHOP}
 
     page_file, result_file = out / f"{fault.name}-{n}.page.json", out / f"{fault.name}-{n}.agent.json"
     page_file.write_text(json.dumps(page, indent=1))
@@ -489,6 +497,9 @@ def render(r: dict) -> str:
                 f"- **Page** after {_s(t['page_s'])}: {t['page']['alertname']} on {t['page']['service']}, "
                 f'"{t["page"]["summary"]}"'
             )
+        if t.get("errors_at_page"):
+            shares = ", ".join(f"{svc} {v:.0%}" for svc, v in t["errors_at_page"].items() if v is not None)
+            lines.append(f"- **Errors when paged** (last minute): {shares}")
         used = [o["tool"] for o in a.get("tools_used", []) if o["tool"] not in (*SAFE_ACTIONS, *HIGH_RISK)]
         if used:
             lines.append(f"- **Looked at**: {', '.join(dict.fromkeys(used))} ({len(used)} tool calls)")

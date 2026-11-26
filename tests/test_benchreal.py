@@ -50,7 +50,7 @@ def test_every_way_a_run_can_end_has_a_plain_verdict(run, recovered, in_sync, ex
     assert br.verdict(FAULT, run, recovered, in_sync) == expected
 
 
-def test_the_page_is_the_first_shop_alert_that_fired():
+def test_the_page_is_the_first_shop_alert_that_fired_and_stock_cluster_alerts_never_page():
     alerts = [
         {"labels": {"alertname": "HighLatencyP95", "namespace": "shop", "service": "checkout"}, "state": "pending",
          "activeAt": "2026-11-26T10:00:00Z"},
@@ -59,6 +59,9 @@ def test_the_page_is_the_first_shop_alert_that_fired():
         {"labels": {"alertname": "HighErrorRate", "namespace": "shop", "service": "frontend"}, "state": "firing",
          "activeAt": "2026-11-26T10:00:30Z"},
     ]  # fmt: skip
+    stock = {"labels": {"alertname": "InfoInhibitor", "namespace": "shop", "severity": "none"}, "state": "firing",
+             "activeAt": "2026-11-26T09:00:00Z"}  # fmt: skip
+    assert br.shop_pages([stock, *alerts]) == alerts[1:2]  # only the shop's own page-severity rules page anyone
     page = br.page_of(alerts)
     assert (page["alertname"], page["service"]) == ("HighErrorRate", "frontend")
     assert br.page_of(alerts[:1]) is None  # pending is not a page
